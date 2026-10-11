@@ -128,10 +128,17 @@
       const u = requireMe();
       if(db.sessions.some(s => s.slot === slot && [s.a, s.b].some(x => x === u.id || x === otherId)))
         throw new Error('One of you already has a dyad at that time.');
-      const s = { id:uid(), a:u.id, b:otherId, slot, createdAt:new Date().toISOString() };
+      const s = { id:uid(), a:u.id, b:otherId, slot, createdAt:new Date().toISOString(), meetingUrl:'https://meet.jit.si/breakthrough-dyad-' + uid() + uid() };
       db.sessions.push(s);
       notify(otherId, { kind:'booked', other:u.id, slots:[slot] });
       save(); return tick(s);
+    },
+    async setMeetingUrl(sessionId, url){
+      const u = requireMe();
+      const s = db.sessions.find(x => x.id === sessionId && (x.a === u.id || x.b === u.id)); if(!s) return;
+      url = String(url || '').trim(); if(url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+      if(!/^https:\/\/[^\s]+\.[^\s]+/i.test(url)) throw new Error('Please paste a full https:// link to your video call.');
+      s.meetingUrl = url.slice(0, 400); save();
     },
     async cancel(sessionId){
       const u = requireMe();

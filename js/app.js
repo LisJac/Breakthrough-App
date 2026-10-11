@@ -10,6 +10,7 @@
     : `<span class="avatar ${cls}">${esc(initials(p?.name))}</span>`;
   // The link people share. Inside the claude.ai preview this is the artifact; once deployed it's the site itself.
   const APP_URL = window.claude ? 'https://claude.ai/artifact/PvwH2B54hxhmUZ3PoyPH39' : location.href.split('#')[0];
+  const host = url => { try{ return new URL(url).hostname.replace(/^www\./, ''); }catch(e){ return url; } };
   const myTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const dateFmt = new Intl.DateTimeFormat('en-GB', { day:'numeric', month:'short' });
 
@@ -70,8 +71,13 @@
       const fresh = notes.filter(n => !n.read && n.kind === 'match').length;
       if(next){
         const other = people.find(p => p.id === (next.a === me.id ? next.b : next.a));
-        line = `Your next dyad is <strong>${esc(M.slotLabel(next.slot))}</strong> with ${other ? esc(other.name.split(' ')[0]) : 'your buddy'}.`;
-        cta = `<a class="btn primary big" href="#buddy">View dyad</a>`;
+        const soon = Date.parse(next.slot) - Date.now() < 30 * 60e3;   // starts within 30 min, or is running
+        line = soon
+          ? `Your dyad with ${other ? esc(other.name.split(' ')[0]) : 'your buddy'} ${Date.parse(next.slot) <= Date.now() ? 'is happening now' : 'starts soon'}.`
+          : `Your next dyad is <strong>${esc(M.slotLabel(next.slot))}</strong> with ${other ? esc(other.name.split(' ')[0]) : 'your buddy'}.`;
+        cta = soon && next.meetingUrl
+          ? `<a class="btn primary big" href="${esc(next.meetingUrl)}" target="_blank" rel="noopener noreferrer">Join video call</a><a class="link on-photo" href="#timer">Open timer</a>`
+          : `<a class="btn primary big" href="#buddy">View dyad</a>`;
       } else if(fresh){
         line = `You have <strong>${fresh} new match${fresh === 1 ? '' : 'es'}</strong>.`;
         cta = `<a class="btn primary big" href="#buddy">See matches</a>`;
@@ -119,7 +125,7 @@
   }
 
   /* ================= FIND A BUDDY ================= */
-  let week = 0, seenUnread = null, saveT = null, pending = null, calOpen = null;
+  let week = 0, seenUnread = null, saveT = null, pending = null, calOpen = null, linkEdit = null;
 
   async function renderBuddy(){
     const el = $('view-buddy'), me = S.auth.current();
@@ -172,6 +178,10 @@
         ${upcoming.length ? `<ul class="list">${upcoming.map(s => { const other = byId[s.a === me.id ? s.b : s.a]; return `
           <li><div class="slot-row"><span class="when">${esc(M.slotLabel(s.slot))}</span>${otherTime(s.slot, other)}</div>
             <div class="person">${avatar(other)}<div><div>${other ? esc(other.name) : 'Former participant'}</div>${other?.question ? `<div class="q">${esc(other.question)}</div>` : ''}</div></div>
+            ${s.meetingUrl ? `<div class="call-row"><a class="btn primary" href="${esc(s.meetingUrl)}" target="_blank" rel="noopener noreferrer">Join video call</a><span class="meta call-host">${esc(host(s.meetingUrl))}</span><button class="link" data-linkedit="${s.id}">Use a different link</button></div>` : ''}
+            ${linkEdit === s.id ? `<form class="link-form" data-linkform="${s.id}"><label class="field">Your own call link (Zoom, Google Meet …)<input name="url" type="text" inputmode="url" required placeholder="https://" value="${esc(s.meetingUrl || '')}" autocomplete="off"></label>
+              <div class="row"><button class="primary" type="submit">Save link</button><button type="button" class="link" data-linkedit="${s.id}">Cancel</button></div>
+              <p class="note">Your buddy sees the new link right away.</p></form>` : ''}
             <div class="row"><button data-cal="${s.id}" aria-expanded="${calOpen === s.id}">Save in calendar</button><button class="danger" data-cancel="${s.id}">Cancel dyad</button></div>
             ${calOpen === s.id ? `<div class="cal-options">
               ${C.canDownloadIcs() ? `<button data-ics="${s.id}">Apple Calendar or Outlook app</button>` : ''}
@@ -237,6 +247,7 @@
       await flushAvailability();
       return attempt(() => S.book(other, slot), 'Booked. Your buddy has been told.');
     }
+    if(t.dataset.linkedit){ linkEdit = linkEdit === t.dataset.linkedit ? null : t.dataset.linkedit; await renderBuddy(); const i = document.querySelector('.link-form input'); if(i){ i.focus(); i.select(); } return; }
     if(t.dataset.cal){ calOpen = calOpen === t.dataset.cal ? null : t.dataset.cal; return renderBuddy(); }
     if(t.dataset.ics){
       const [people, sessions] = await Promise.all([S.people(), S.sessions()]);
@@ -250,6 +261,12 @@
       return attempt(() => S.cancel(t.dataset.cancel), 'Dyad cancelled.');
     }
   });
+  $('view-buddy').addEventListener('submit', async e => {
+    const f = e.target.closest('[data-linkform]'); if(!f) return;
+    e.preventDefault();
+    const url = new FormData(f).get('url');
+    if(await attempt(() => S.setMeetingUrl(f.dataset.linkform, url), 'Call link saved.')){ linkEdit = null; renderBuddy(); }
+  });
   async function flushAvailability(){ if(pending){ clearTimeout(saveT); const p = pending; pending = null; await S.setAvailability(p); } }
   window.addEventListener('pagehide', () => { if(pending) S.setAvailability(pending); });
 
@@ -257,7 +274,6 @@
   let filter = 'all', formOpen = false, openItem = null;
   let layout = (() => { try{ return localStorage.getItem('breakthrough.layout') || 'list'; }catch(e){ return 'list'; } })();
   const setLayout = v => { layout = v; try{ localStorage.setItem('breakthrough.layout', v); }catch(e){} };
-  const host = url => { try{ return new URL(url).hostname.replace(/^www\./, ''); }catch(e){ return url; } };
 
   async function renderInspiration(){
     const el = $('view-inspiration'), me = S.auth.current();

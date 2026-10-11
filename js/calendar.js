@@ -6,18 +6,20 @@
   const endOf = iso => new Date(Date.parse(iso) + 3600e3).toISOString();
   const icsText = s => String(s).replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1');
 
-  function details(slot, me, other){
+  function details(session, me, other){
+    const slot = session.slot, link = session.meetingUrl || '';
     const lines = [
       `Online dyad with ${other ? other.name : 'your buddy'}.`,
+      link ? `Video call: ${link}` : '',
       me && me.question ? `Your question: ${me.question}` : '',
       other && other.question ? `${other.name.split(' ')[0]}'s question: ${other.question}` : '',
       'Open the Timer in the Breakthrough App when you both are ready.'
     ].filter(Boolean);
-    return { title: `Dyad with ${other ? other.name : 'your buddy'}`, body: lines.join('\n'), start: slot, end: endOf(slot) };
+    return { title: `Dyad with ${other ? other.name : 'your buddy'}`, body: lines.join('\n'), start: slot, end: endOf(slot), link };
   }
 
   function ics(session, me, other){
-    const e = details(session.slot, me, other);
+    const e = details(session, me, other);
     return [
       'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Breakthrough App//Dyads//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
       'BEGIN:VEVENT',
@@ -25,20 +27,21 @@
       `DTSTAMP:${stamp(new Date().toISOString())}`,
       `DTSTART:${stamp(e.start)}`, `DTEND:${stamp(e.end)}`,
       `SUMMARY:${icsText(e.title)}`, `DESCRIPTION:${icsText(e.body)}`,
+      ...(e.link ? [`LOCATION:${icsText(e.link)}`, `URL:${e.link}`] : []),
       'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(e.title)}`, 'TRIGGER:-PT15M', 'END:VALARM',
       'END:VEVENT', 'END:VCALENDAR', ''
     ].join('\r\n');
   }
 
   function googleUrl(session, me, other){
-    const e = details(session.slot, me, other);
-    const q = new URLSearchParams({ action:'TEMPLATE', text:e.title, dates:`${stamp(e.start)}/${stamp(e.end)}`, details:e.body });
+    const e = details(session, me, other);
+    const q = new URLSearchParams({ action:'TEMPLATE', text:e.title, dates:`${stamp(e.start)}/${stamp(e.end)}`, details:e.body, location:e.link });
     return 'https://calendar.google.com/calendar/render?' + q.toString();
   }
 
   function outlookUrl(session, me, other){
-    const e = details(session.slot, me, other);
-    const q = new URLSearchParams({ path:'/calendar/action/compose', rru:'addevent', subject:e.title, startdt:e.start, enddt:e.end, body:e.body });
+    const e = details(session, me, other);
+    const q = new URLSearchParams({ path:'/calendar/action/compose', rru:'addevent', subject:e.title, startdt:e.start, enddt:e.end, body:e.body, location:e.link });
     return 'https://outlook.live.com/calendar/0/deeplink/compose?' + q.toString();
   }
 

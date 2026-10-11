@@ -238,3 +238,10 @@ body.on-home .brand span{opacity:.75}
   .home-wrap{min-height:calc(100vh - 64px - env(safe-area-inset-bottom,0px));min-height:calc(100dvh - 64px - env(safe-area-inset-bottom,0px))}
   main:has(> .home-wrap:not([hidden])){padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))}
 }
+
+/* ---------- video call on a booked dyad ---------- */
+.call-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.call-host{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.link-form{display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--surface);border-radius:8px;max-width:440px}
+a.link.on-photo{color:rgba(255,255,255,.85);font-size:14px;text-decoration:none;padding:4px 6px;text-shadow:0 1px 12px rgba(30,40,70,.4)}
+a.link.on-photo:hover{color:#ffffff}

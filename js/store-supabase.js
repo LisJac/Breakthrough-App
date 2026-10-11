@@ -44,6 +44,12 @@
     const { count } = await sb.from('notifications').select('id', { count:'exact', head:true }).eq('read', false);
     unread = count || 0;
   }
+  function cleanUrl(url){
+    url = String(url || '').trim();
+    if(url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+    if(!/^https:\/\/[^\s]+\.[^\s]+/i.test(url)) throw new Error('Please paste a full https:// link to your video call.');
+    return url.slice(0, 400);
+  }
   const requireMe = () => { if(!me) throw new Error('Please sign in first.'); return me; };
 
   const ready = loadMe().catch(e => console.warn(e));
@@ -130,14 +136,20 @@
     // Only your own dyads are visible; slots booked by others are already removed from their availability.
     async sessions(){
       if(!me) return [];
-      const { data, error } = await sb.from('sessions').select('id,a,b,slot,created_at').order('slot');
-      fail(error); return (data || []).map(s => ({ id:s.id, a:s.a, b:s.b, slot:iso(s.slot), createdAt:s.created_at }));
+      const { data, error } = await sb.from('sessions').select('id,a,b,slot,created_at,meeting_url').order('slot');
+      fail(error); return (data || []).map(s => ({ id:s.id, a:s.a, b:s.b, slot:iso(s.slot), createdAt:s.created_at, meetingUrl:s.meeting_url }));
     },
     async allSessions(){ return Store.sessions(); },
     async book(otherId, slot){
       requireMe();
       const { data, error } = await sb.rpc('book_dyad', { other: otherId, slot_at: slot });
       fail(error); emit(); return data;
+    },
+    async setMeetingUrl(sessionId, url){
+      requireMe();
+      url = cleanUrl(url);
+      const { error } = await sb.from('sessions').update({ meeting_url:url }).eq('id', sessionId);
+      fail(error); emit();
     },
     async cancel(sessionId){
       requireMe();
