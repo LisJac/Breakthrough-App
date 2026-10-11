@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Breakthrough App</title>
+<meta name="description" content="Find a dyad partner, share inspiration and run your dyads — for participants of the Breakthrough Intensive.">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@300;400&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="#home">Breakthrough <span>App</span></a>
+    <nav class="tabs" aria-label="Main">
+      <a href="#buddy" data-tab="buddy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="9" r="3.2"/><circle cx="16" cy="9" r="3.2"/><path d="M2.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M10.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/></svg>
+        <span>Find a buddy</span><span class="badge" id="navBadge" hidden></span>
+      </a>
+      <a href="#timer" data-tab="timer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 3h5"/></svg>
+        <span>Timer</span>
+      </a>
+      <a href="#inspiration" data-tab="inspiration">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>
+        <span>Inspiration</span>
+      </a>
+      <a href="#account" data-tab="account">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5"/></svg>
+        <span id="navAccount">Account</span>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- Find a buddy, Inspiration and Account are rendered by js/app.js -->
+  <div class="home-wrap" id="view-home" hidden></div>
+  <div class="page" id="view-buddy" hidden></div>
+  <div class="page" id="view-inspiration" hidden></div>
+  <div class="page" id="view-account" hidden></div>
+
+  <!-- Timer: ported from the Dyad Timer artifact, logic in js/timer.js -->
+  <div class="page" id="view-timer" hidden>
+    <div class="crumb">Breakthrough Intensive <span>/</span> Timer</div>
+
+    <section class="step" id="s1">
+      <div class="steplabel"><span class="dots"><b class=on></b><b></b><b></b></span>Step 1 of 3</div>
+      <h1 class="prompt">Decide who is Partner&nbsp;A and who is Partner&nbsp;B.</h1>
+      <p class="hint">Partner A gives the first instruction. You change roles after every turn.</p>
+      <div class="stepnav"><button class="primary" id="go2">Continue</button></div>
+    </section>
+
+    <section class="step" id="s2" hidden>
+      <div class="steplabel"><span class="dots"><b class=on></b><b class=on></b><b></b></span>Step 2 of 3</div>
+      <h1 class="prompt">Tell your partner your instruction, for example <q>Tell me who you are.</q></h1>
+      <p class="hint">Each partner keeps the same question for the whole dyad.</p>
+      <div class="stepnav"><button class="primary" id="go3">Continue</button><button class="link" id="back1">Back</button></div>
+    </section>
+
+    <div class="step" id="s3" hidden>
+      <div class="stepnav"><div class="steplabel"><span class="dots"><b class=on></b><b class=on></b><b class=on></b></span>Step 3 of 3</div><span style="flex:1"></span><button class="link" id="back2">Back</button></div>
+      <h1>Dyad</h1>
+
+      <dl class="props timer-props">
+        <dt>Turns</dt>
+        <dd class="field"><input id="turns" type="number" inputmode="numeric" min="1" max="20" value="8" aria-label="Number of turns"><span class="note">alternating A → B</span></dd>
+        <dt>Turn length</dt>
+        <dd class="field"><input id="len" type="text" inputmode="numeric" value="4:40" placeholder="4:40" aria-label="Turn length in minutes and seconds"><span class="note">min:sec</span></dd>
+        <dt>Total</dt>
+        <dd id="total" style="font-variant-numeric:tabular-nums">≈ 39 min</dd>
+      </dl>
+
+      <section class="stage" aria-live="polite">
+        <div class="phase" id="phase">Ready</div>
+        <div class="clock idle" id="clock">4:40</div>
+        <div class="say quiet" id="say">Sit opposite your partner. Press Start when you are both ready.</div>
+        <div class="strip" id="strip"></div>
+        <div class="strip-labels"><span id="turnLabel">Turn 0 of 8</span><span id="remainLabel">39:00 left</span></div>
+        <div class="controls">
+          <button class="primary" id="startBtn">Start</button>
+          <button id="stopBtn" disabled>Stop</button>
+          <button id="restartBtn" disabled>Restart</button>
+        </div>
+        <div class="toggles">
+          <label><input type="checkbox" id="voiceOn" checked> Voice</label>
+          <label><input type="checkbox" id="bellOn" checked> Singing bowl</label>
+          <button id="testBtn" style="min-height:0;padding:2px 10px;font-size:13px">Test sound</button>
+        </div>
+      </section>
+
+      <section hidden><ol class="seq" id="seq"></ol></section>
+      <p class="note">Keep this screen open during the dyad. On phones, turn the ringer on and don't lock the screen, or sounds may be delayed.</p>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="js/clips.js"></script>
+<script src="js/matching.js"></script>
+<script src="js/store.js"></script>
+<script src="js/devseed.js"></script>
+<script src="js/calendar.js"></script>
+<script src="js/timer.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
