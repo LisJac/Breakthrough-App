@@ -45,6 +45,7 @@
     render();
   }
   window.addEventListener('hashchange', go);
+  document.addEventListener('click', e => { if(e.target.closest('#retryLoad')) render(); });
 
   /* ---------- shared bits ---------- */
   function navChrome(){
@@ -279,7 +280,7 @@
           ${item.note ? `<p class="why">${esc(item.note)}</p>` : `<p class="empty">No note added.</p>`}
           ${item.link ? `<div class="row"><a class="btn primary" href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">Open link</a><span class="meta">${esc(host(item.link))}</span></div>` : ''}
           <hr>
-          <div class="person">${avatar(author)}<div><div>Added by ${author ? esc(author.name) : 'a former participant'}</div><div class="meta">${esc(dateFmt.format(new Date(item.createdAt)))}</div></div></div>
+          <div class="person">${avatar(author)}<div><div>Added by ${author ? esc(author.name) : (S.auth.current() ? 'a former participant' : 'a participant')}</div><div class="meta">${esc(dateFmt.format(new Date(item.createdAt)))}</div></div></div>
           ${me && me.id === item.authorId ? `<div class="row"><button class="danger" data-remove="${item.id}">Remove entry</button></div>` : ''}
         </article>`;
       return;
@@ -367,7 +368,7 @@
   const tzSelect = cur => `<select name="timezone">${(zones.includes(cur) ? zones : [cur, ...zones]).map(z => `<option value="${esc(z)}" ${z === cur ? 'selected' : ''}>${esc(z.replace(/_/g,' '))}</option>`).join('')}</select>`;
   const qSelect = cur => `<select name="question">${(QUESTIONS.includes(cur) || !cur ? QUESTIONS : [cur, ...QUESTIONS]).map(q => `<option ${q === cur ? 'selected' : ''}>${esc(q)}</option>`).join('')}</select>`;
 
-  const devTools = `
+  const devTools = !S.dev ? '' : `
     <hr>
     <section class="section"><h2>Local testing</h2>
       <p class="note">Data is stored only in this browser while we work locally. To try matching, add sample participants, or open a second tab and sign in as someone else (each tab keeps its own sign-in).</p>
@@ -385,12 +386,14 @@
         ${authMode === 'signin' ? `
           <form class="form" id="signinForm">
             <label class="field">Email<input name="email" type="email" required autocomplete="email" inputmode="email"></label>
+            ${S.needsPassword ? `<label class="field">Password<input name="password" type="password" required autocomplete="current-password"></label>` : ''}
             <div class="row"><button class="primary" type="submit">Sign in</button><button type="button" class="link" data-mode="signup">New here? Create an account</button></div>
-            <p class="note">While we work locally there's no password. After launch you'll get a sign-in link by email.</p>
+            ${S.needsPassword ? '' : `<p class="note">This preview keeps everything in your browser, so there's no password.</p>`}
           </form>` : `
           <form class="form" id="signupForm">
             <label class="field">Name<input name="name" required maxlength="60" autocomplete="name"></label>
             <label class="field">Email<input name="email" type="email" required autocomplete="email" inputmode="email"></label>
+            ${S.needsPassword ? `<label class="field">Password<input name="password" type="password" required minlength="6" autocomplete="new-password"><span class="note">At least 6 characters</span></label>` : ''}
             <label class="field">Your question ${qSelect('Who am I?')}</label>
             <label class="field">Time zone ${tzSelect(myTz)}</label>
             <div class="row"><button class="primary" type="submit">Create account</button><button type="button" class="link" data-mode="signin">I already have one</button></div>
@@ -458,7 +461,7 @@
   $('view-account').addEventListener('submit', async e => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    if(e.target.id === 'signinForm'){ if(await attempt(() => S.auth.signIn(f.email), 'Welcome back.')) location.hash = '#buddy'; }
+    if(e.target.id === 'signinForm'){ if(await attempt(() => S.auth.signIn(f.email, f.password), 'Welcome back.')) location.hash = '#buddy'; }
     if(e.target.id === 'signupForm'){ if(await attempt(() => S.auth.signUp(f), 'Account created.')) location.hash = '#buddy'; }
     if(e.target.id === 'profileForm') attempt(() => S.auth.update({ name:f.name.trim(), question:f.question, timezone:f.timezone, lookingForBuddy:!!f.lookingForBuddy }), 'Saved.');
   });
@@ -469,10 +472,15 @@
     if(renderQueued) return; renderQueued = true;
     queueMicrotask(async () => {
       renderQueued = false; navChrome();
-      if(route === 'home') await renderHome();
-      else if(route === 'buddy') await renderBuddy();
-      else if(route === 'inspiration') await renderInspiration();
-      else if(route === 'account') await renderAccount();
+      try{
+        if(route === 'home') await renderHome();
+        else if(route === 'buddy') await renderBuddy();
+        else if(route === 'inspiration') await renderInspiration();
+        else if(route === 'account') await renderAccount();
+      }catch(e){
+        console.error(e);
+        if(route !== 'timer') $('view-' + route).innerHTML = `<div class="callout"><p>${esc(e.message || 'Something went wrong.')}</p><div class="row"><button id="retryLoad">Try again</button></div></div>`;
+      }
     });
   }
   // Re-render on data changes, but not while someone is typing in a form.
@@ -480,5 +488,5 @@
   // Slots slide into the past as time goes on.
   setInterval(() => { if(route === 'buddy' && !pending) render(); }, 5 * 60e3);
 
-  go();
+  Promise.resolve(S.ready).then(go, go);
 })();
