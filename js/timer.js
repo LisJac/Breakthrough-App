@@ -1,36 +1,55 @@
-/* Dyad timer — ported unchanged from the Dyad Timer artifact.
- * Only changes: audio clips come from js/clips.js, and keyboard shortcuts
- * only act while the Timer tab is open. */
+/* Dyad timer, ported from the Dyad Timer artifact.
+ * Changes: audio clips come from js/clips.js, keyboard shortcuts only act while
+ * the Timer tab is open, and the bell sound can be chosen in Settings. */
 (() => {
   const $ = id => document.getElementById(id);
   const timerVisible = () => !$('view-timer').hidden;
-  const BELL_HOLD = 4200; // ms between bowl strike and voice
+  // ---------- audio: synthesised bell sounds (chosen under Account → Settings) ----------
+  // Each sound is a few decaying sine partials plus a short strike noise.
+  // hold = ms to wait after the strike before the voice starts.
+  const SOUNDS = {
+    bell:  { label:'Bright bell', hint:'Clear and short (default)', hold:2200, f0:659.3, gain:.28, beat:.8,
+             partials:[[1,1,2.6],[2,.32,1.7],[2.76,.42,1.3],[5.4,.16,.7],[8.9,.06,.35]], strike:{ lp:4200, gain:.18 } },
+    chime: { label:'Tingsha', hint:'High and shimmering', hold:2600, f0:1396.9, gain:.32, beat:2.6,
+             partials:[[1,1,3.2],[2.71,.35,1.6],[5.15,.12,.8]], strike:{ lp:7000, gain:.12 } },
+    bowl:  { label:'Singing bowl', hint:'Deep and long', hold:4200, f0:196, gain:.32, beat:.6,
+             partials:[[1,1,9],[2.71,.5,6],[5.2,.22,4],[8.4,.1,2.6],[12.1,.05,1.6]], strike:{ lp:1800, gain:.25 } },
+    wood:  { label:'Wood block', hint:'A soft knock, no ringing', hold:900, f0:880, gain:.45, beat:0,
+             partials:[[1,1,.2],[1.52,.45,.12],[2.4,.2,.07]], strike:{ lp:2500, gain:.3 } }
+  };
+  const getSound = () => { try{ const k = localStorage.getItem('breakthrough.sound'); return SOUNDS[k] ? k : 'bell'; }catch(e){ return 'bell'; } };
+  const setSound = k => { if(SOUNDS[k]) try{ localStorage.setItem('breakthrough.sound', k); }catch(e){} };
 
-  // ---------- audio: synthesised singing bowl ----------
   let ctx = null;
   function audio(){ if(!ctx){ ctx = new (window.AudioContext||window.webkitAudioContext)(); } if(ctx.state==='suspended' && !paused) ctx.resume(); return ctx; }
-  function bowl(){
-    if(!$('bellOn').checked) return;
-    const c = audio(), t = c.currentTime, f0 = 196;
-    const out = c.createGain(); out.gain.value = .32; out.connect(c.destination);
-    const partials = [[1,1,9],[2.71,.5,6],[5.2,.22,4],[8.4,.1,2.6],[12.1,.05,1.6]];
-    partials.forEach(([r,amp,dec]) => {
-      [-.6,.6].forEach(det => {
+  function strike(key){
+    const sd = SOUNDS[key] || SOUNDS.bell;
+    const c = audio(), t = c.currentTime;
+    const out = c.createGain(); out.gain.value = sd.gain; out.connect(c.destination);
+    sd.partials.forEach(([r, amp, dec]) => {
+      (sd.beat ? [-sd.beat, sd.beat] : [0]).forEach(det => {
         const o = c.createOscillator(), g = c.createGain();
-        o.type='sine'; o.frequency.value = f0*r + det*r;
-        g.gain.setValueAtTime(0,t);
-        g.gain.linearRampToValueAtTime(amp*.5,t+.008);
-        g.gain.exponentialRampToValueAtTime(.0001,t+dec);
-        o.connect(g); g.connect(out); o.start(t); o.stop(t+dec+.1);
+        o.type = 'sine'; o.frequency.value = sd.f0 * r + det * r;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(amp * (sd.beat ? .5 : 1), t + .005);
+        g.gain.exponentialRampToValueAtTime(.0001, t + dec);
+        o.connect(g); g.connect(out); o.start(t); o.stop(t + dec + .1);
       });
     });
-    // soft mallet strike
-    const n = c.createBuffer(1, c.sampleRate*.05, c.sampleRate), d = n.getChannelData(0);
-    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,3);
+    // mallet strike
+    const n = c.createBuffer(1, c.sampleRate * .04, c.sampleRate), d = n.getChannelData(0);
+    for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
     const s = c.createBufferSource(), lp = c.createBiquadFilter(), sg = c.createGain();
-    s.buffer=n; lp.type='lowpass'; lp.frequency.value=1800; sg.gain.value=.25;
+    s.buffer = n; lp.type = 'lowpass'; lp.frequency.value = sd.strike.lp; sg.gain.value = sd.strike.gain;
     s.connect(lp); lp.connect(sg); sg.connect(out); s.start(t);
   }
+  function bowl(){ if($('bellOn').checked) strike(getSound()); }
+  const bellHold = last => SOUNDS[getSound()].hold + (last ? 1500 : 0);
+  // Used by Settings to list and preview the sounds.
+  window.TimerSounds = {
+    list: () => Object.entries(SOUNDS).map(([key, s]) => ({ key, label:s.label, hint:s.hint })),
+    get: getSound, set: setSound, play: key => strike(key)
+  };
 
   // ---------- voice: recorded instructions ----------
   const CLIP_SRC = window.DYAD_CLIPS || {};
@@ -133,7 +152,7 @@
       if(s.type==='bell'){
         $('phase').textContent = 'Singing bowl';
         bowl();
-        if(!(await wait(s.last?6000:BELL_HOLD, tk))) return;
+        if(!(await wait(bellHold(s.last), tk))) return;
       } else if(s.type==='voice'){
         $('phase').textContent = 'Instruction';
         $('say').textContent = s.text; $('say').classList.remove('quiet');

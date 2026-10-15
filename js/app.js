@@ -161,8 +161,7 @@
 
   async function renderBuddy(){
     const el = $('view-buddy'), me = S.auth.current();
-    const head = `<div class="crumb">Breakthrough Online <span>/</span> Find a buddy</div>
-      <h1>Find a dyad buddy</h1>`;
+    const head = `<h1>Find a dyad buddy</h1>`;
 
     if(!me){
       const [n, events] = await Promise.all([S.lookingCount(), S.events()]);
@@ -382,7 +381,6 @@
     const el = $('view-inspiration'), me = S.auth.current();
     const [items, people] = await Promise.all([S.inspiration(), S.people()]);
     const byId = Object.fromEntries(people.map(p => [p.id, p]));
-    const crumb = `<div class="crumb">Breakthrough Online <span>/</span> Inspiration</div>`;
     const by = i => { const a = byId[i.authorId]; return `${a ? esc(a.name.split(' ')[0]) : 'Someone'} · ${esc(dateFmt.format(new Date(i.createdAt)))}`; };
 
     // ---- one entry ----
@@ -390,7 +388,7 @@
     if(openItem && !item) openItem = null;
     if(item){
       const author = byId[item.authorId];
-      el.innerHTML = `${crumb}
+      el.innerHTML = `
         <div><button class="link" id="inspBack">← All inspiration</button></div>
         <article class="detail">
           <span class="tag">${esc(typeLabel(item.type))}</span>
@@ -414,7 +412,7 @@
       tiles: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="5.5" height="5.5" rx="1"/><rect x="11.5" y="3" width="5.5" height="5.5" rx="1"/><rect x="3" y="11.5" width="5.5" height="5.5" rx="1"/><rect x="11.5" y="11.5" width="5.5" height="5.5" rx="1"/></svg>'
     };
 
-    el.innerHTML = `${crumb}
+    el.innerHTML = `
       <h1>Inspiration board</h1>
       <p class="lede">Books, films and other things that have helped others on the path. Anyone can browse. Add your own with an account.</p>
 
@@ -532,12 +530,11 @@
         <a href="#notifications" ${sub === 'notifications' ? 'aria-current="page"' : ''}>Notifications${n ? ` <span class="badge">${n}</span>` : ''}</a>
         <a href="#settings" ${sub === 'settings' ? 'aria-current="page"' : ''}>Settings</a>
       </nav>`;
-    const head = `<div class="crumb">Breakthrough Online <span>/</span> Account</div>` + subnav;
+    const head = `` + subnav;
 
     // Arrived from a password-reset email.
     if(S.recovering){
-      el.innerHTML = `<div class="crumb">Breakthrough Online <span>/</span> Account</div>
-        <h1>Set a new password</h1>
+      el.innerHTML = `<h1>Set a new password</h1>
         <p class="lede">Choose a new password for ${me ? esc(me.email) : 'your account'}.</p>
         <form class="form" id="newPwForm">
           <label class="field">New password<input name="password" type="password" required minlength="6" autocomplete="new-password"><span class="note">At least 6 characters</span></label>
@@ -557,6 +554,13 @@
           </div>
           <p class="note">Automatic follows your device's light or dark setting. This is saved on this device only.</p>
         </section>
+        ${window.TimerSounds ? `<section class="section"><h2>Timer sound</h2>
+          <ul class="list sounds" role="radiogroup" aria-label="Timer sound">${TimerSounds.list().map(s => `
+            <li><label class="sound-opt"><input type="radio" name="sound" value="${s.key}" ${TimerSounds.get() === s.key ? 'checked' : ''}>
+              <span><span class="sound-name">${esc(s.label)}</span><span class="meta">${esc(s.hint)}</span></span></label>
+              <button type="button" class="play" data-play="${s.key}" aria-label="Play ${esc(s.label)}">▶ Play</button></li>`).join('')}
+          </ul>
+          <p class="note">Plays at the start of every turn. Saved on this device only.</p></section>` : ''}
         ${me && S.needsPassword ? `<section class="section"><h2>Password</h2>
           <form class="form" id="changePwForm">
             <label class="field">New password<input name="password" type="password" required minlength="6" autocomplete="new-password"><span class="note">At least 6 characters</span></label>
@@ -644,6 +648,7 @@
   $('view-account').addEventListener('click', async e => {
     const t = e.target.closest('button'); if(!t) return;
     if(t.dataset.mode){ authMode = t.dataset.mode; resetSentTo = ''; return renderAccount(); }
+    if(t.dataset.play){ window.TimerSounds && TimerSounds.play(t.dataset.play); return; }
     if(t.id === 'recoveryCancel'){ S.auth.cancelRecovery(); location.hash = '#home'; return; }
     if(t.id === 'signOut'){ await flushAvailability(); return attempt(() => S.auth.signOut(), 'Signed out.'); }
     if(t.id === 'delAcct'){
@@ -671,6 +676,7 @@
     });
   }
   $('view-account').addEventListener('change', async e => {
+    if(e.target.name === 'sound'){ TimerSounds.set(e.target.value); TimerSounds.play(e.target.value); return; }
     if(e.target.name === 'theme'){ setTheme(e.target.value); toast(`Appearance: ${THEMES.find(x => x[0] === e.target.value)[1]}.`); return; }
     if(e.target.id !== 'photoInput') return;
     const file = e.target.files && e.target.files[0]; e.target.value = '';
