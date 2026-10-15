@@ -1,4 +1,4 @@
-/* App shell: routing and the three data views (Find a buddy, Inspiration, Account).
+/* App shell: routing and the data views (Home, Find a buddy, Inspiration, Account).
  * All data goes through window.Store; all slot maths through window.Matching. */
 (function(){
   const $ = id => document.getElementById(id);
@@ -33,15 +33,21 @@
   }
 
   /* ---------- routing ---------- */
-  const TABS = ['home','buddy','inspiration','account','timer'];
+  const ROUTES = ['home','buddy','inspiration','account','notifications','settings','timer'];
+  const VIEWS = ['home','buddy','inspiration','account','timer'];
+  const viewOf = r => (r === 'notifications' || r === 'settings') ? 'account' : r;
+  const TITLES = { buddy:'Find a buddy', inspiration:'Inspiration', account:'Account', notifications:'Notifications', settings:'Settings', timer:'Timer' };
   let route = 'home';
-  function readRoute(){ const r = (location.hash.replace(/^#\/?/, '') || 'home').split(/[?\/]/)[0]; return TABS.includes(r) ? r : 'home'; }
+  function readRoute(){ const r = (location.hash.replace(/^#\/?/, '') || 'home').split(/[?\/&=]/)[0]; return ROUTES.includes(r) ? r : 'home'; }
   function go(){
     const prev = route; route = readRoute();
-    TABS.forEach(t => $('view-' + t).hidden = t !== route);
-    document.body.classList.toggle('on-home', route === 'home');
-    document.querySelectorAll('.tabs a').forEach(a => a.dataset.tab === route ? a.setAttribute('aria-current','page') : a.removeAttribute('aria-current'));
-    document.title = route === 'home' ? 'Breakthrough App' : { buddy:'Find a buddy', inspiration:'Inspiration', account:'Account', timer:'Timer' }[route] + ' · Breakthrough App';
+    // Opened from a password-reset email: go straight to "Set a new password".
+    if(S.recovering && route === 'home'){ route = 'account'; try{ history.replaceState(null, '', location.pathname + '#account'); }catch(e){} }
+    const view = viewOf(route);
+    VIEWS.forEach(t => $('view-' + t).hidden = t !== view);
+    document.body.classList.toggle('on-home', view === 'home');
+    document.querySelectorAll('.tabs a').forEach(a => a.dataset.tab === view ? a.setAttribute('aria-current','page') : a.removeAttribute('aria-current'));
+    document.title = route === 'home' ? 'Breakthrough Online' : TITLES[route] + ' · Breakthrough Online';
     if(prev !== route){ seenUnread = null; openItem = null; window.scrollTo(0, 0); }
     render();
   }
@@ -51,9 +57,35 @@
   /* ---------- shared bits ---------- */
   function navChrome(){
     const u = S.auth.current(), n = S.unreadCount();
-    $('navBadge').hidden = !n; $('navBadge').textContent = n;
+    $('navBadge').hidden = !n; $('navBadge').textContent = n > 9 ? '9+' : n;
     $('navAccount').textContent = u ? u.name.split(' ')[0] : 'Account';
   }
+  // "Save in calendar" options for any entry (dyad or event). Entries are kept so the .ics button can find them.
+  const calEntries = new Map();
+  function calOptions(key, entry){
+    calEntries.set(key, entry);
+    return `<div class="cal-options">
+      ${C.canDownloadIcs() ? `<button data-ics="${esc(key)}">Apple Calendar or Outlook app</button>` : ''}
+      <a class="btn" href="${esc(C.googleUrl(entry))}" target="_blank" rel="noopener noreferrer">Google Calendar</a>
+      <a class="btn" href="${esc(C.outlookUrl(entry))}" target="_blank" rel="noopener noreferrer">Outlook.com</a>
+      ${C.canDownloadIcs() ? '' : `<p class="note">Apple Calendar files work once the app is live. In this preview, use Google or Outlook.</p>`}
+    </div>`;
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-ics]'); if(!b) return;
+    const entry = calEntries.get(b.dataset.ics); if(!entry) return;
+    C.downloadIcs(entry); toast('Calendar file saved. Open it to add it to your calendar.');
+  });
+
+  function noteText(n, byId){
+    const who = id => byId[id] ? esc(byId[id].name) : 'Your buddy';
+    const when = n.slots.slice(0, 3).map(M.slotLabel).join(', ') + (n.slots.length > 3 ? ` and ${n.slots.length - 3} more` : '');
+    if(n.kind === 'match') return `<strong>New match with ${who(n.other)}.</strong> You're both free ${esc(when)}.`;
+    if(n.kind === 'booked') return `<strong>${who(n.other)} booked a dyad with you</strong> for ${esc(when)}.`;
+    if(n.kind === 'cancelled') return `<strong>Dyad cancelled</strong> for ${esc(when)}. ${n.note ? esc(n.note) : who(n.other) + ' cancelled it.'}`;
+    return '';
+  }
+
   const signInPrompt = what => `
     <div class="callout"><p>${what}</p>
       <div class="row"><a class="btn primary" href="#account">Sign in or create account</a></div></div>`;
@@ -107,10 +139,10 @@
 
   /* ---------- sharing ---------- */
   // Phones get the native share sheet; elsewhere the link is copied, with the link shown as a fallback.
-  const SHARE_TEXT = 'The Breakthrough App: find a dyad buddy, use the timer for online dyads and share inspiration with other practitioners of the Breakthrough Intensive.';
+  const SHARE_TEXT = 'Breakthrough Online: find a dyad buddy, use the timer for online dyads and share inspiration with other practitioners of the Breakthrough Intensive.';
   async function shareApp(){
     if(navigator.share){
-      try{ await navigator.share({ title:'Breakthrough App', text:SHARE_TEXT, url:APP_URL }); return; }
+      try{ await navigator.share({ title:'Breakthrough Online', text:SHARE_TEXT, url:APP_URL }); return; }
       catch(e){ if(e && e.name === 'AbortError') return; }
     }
     copyLink();
@@ -125,23 +157,25 @@
   }
 
   /* ================= FIND A BUDDY ================= */
-  let week = 0, seenUnread = null, saveT = null, pending = null, calOpen = null, linkEdit = null;
+  let week = 0, seenUnread = null, saveT = null, pending = null, calOpen = null, linkEdit = null, evFormOpen = false, partsOpen = null;
 
   async function renderBuddy(){
     const el = $('view-buddy'), me = S.auth.current();
-    const head = `<div class="crumb">Breakthrough Intensive <span>/</span> Find a buddy</div>
+    const head = `<div class="crumb">Breakthrough Online <span>/</span> Find a buddy</div>
       <h1>Find a dyad buddy</h1>`;
 
     if(!me){
-      const n = await S.lookingCount();
+      const [n, events] = await Promise.all([S.lookingCount(), S.events()]);
       el.innerHTML = head + `
         <p class="lede">Mark the hours you're free to sit a dyad online. When someone else is free at the same time, you both get a note with the shared slot, and either of you can book it.</p>
         <dl class="props"><dt>Looking now</dt><dd>${n} participant${n === 1 ? '' : 's'}</dd><dt>Format</dt><dd>One hour block · about 40 minutes of dyad, with the timer</dd></dl>
-        ${signInPrompt('You need an account to add your availability and see who you match with.')}`;
+        ${signInPrompt('You need an account to add your availability, see who you match with and join community events.')}
+        ${eventsSection(events, null, {})}`;
       return;
     }
 
-    const [people, avail, sessions, allSessions, notes] = await Promise.all([S.people(), S.allAvailability(), S.sessions(), S.allSessions(), S.notifications()]);
+    const [people, avail, sessions, allSessions, events] = await Promise.all([S.people(), S.allAvailability(), S.sessions(), S.allSessions(), S.events()]);
+    const participants = me.isAdmin && partsOpen ? await S.eventParticipants(partsOpen) : [];
     const byId = Object.fromEntries(people.map(p => [p.id, p]));
     const mine = new Set(pending || avail[me.id] || []);
     const now = Date.now();
@@ -152,27 +186,14 @@
     const othersFree = {};
     people.forEach(p => { if(p.id === me.id || p.lookingForBuddy === false) return; (avail[p.id] || []).forEach(s => othersFree[s] = (othersFree[s] || 0) + 1); });
 
-    if(seenUnread === null){ seenUnread = new Set(notes.filter(n => !n.read).map(n => n.id)); if(seenUnread.size) S.markAllRead(); }
-    const recent = notes.slice(0, 5);
-
-    const who = id => byId[id] ? esc(byId[id].name) : 'Your buddy';
     const otherTime = (iso, p) => p && p.timezone && p.timezone !== myTz ? `<span class="meta">${esc(M.inZone(iso, p.timezone))} for ${esc(p.name.split(' ')[0])}</span>` : '';
-
-    const noteText = n => {
-      const when = n.slots.slice(0, 3).map(M.slotLabel).join(', ') + (n.slots.length > 3 ? ` and ${n.slots.length - 3} more` : '');
-      if(n.kind === 'match') return `<strong>New match with ${who(n.other)}.</strong> You're both free ${esc(when)}.`;
-      if(n.kind === 'booked') return `<strong>${who(n.other)} booked a dyad with you</strong> for ${esc(when)}.`;
-      if(n.kind === 'cancelled') return `<strong>Dyad cancelled</strong> for ${esc(when)}. ${n.note ? esc(n.note) : who(n.other) + ' cancelled it.'}`;
-      return '';
-    };
 
     el.innerHTML = head + `
       <p class="lede">Mark the hours you're free. When someone shares a slot with you, you'll both be told here, and either of you can book it.</p>
 
       ${me.lookingForBuddy === false ? `<div class="callout"><p>You're currently hidden from matching.</p><div class="row"><button id="unpause">Show me to others again</button></div></div>` : ''}
 
-      ${recent.length ? `<section class="section"><h2>Updates</h2><ul class="list">${recent.map(n => `
-        <li class="${seenUnread.has(n.id) ? 'unread' : ''}"><div>${noteText(n)}</div><div class="meta">${dateFmt.format(new Date(n.createdAt))}</div></li>`).join('')}</ul></section>` : ''}
+      ${eventsSection(events, me, { byId, participants })}
 
       <section class="section"><h2>Your upcoming dyads</h2>
         ${upcoming.length ? `<ul class="list">${upcoming.map(s => { const other = byId[s.a === me.id ? s.b : s.a]; return `
@@ -183,12 +204,7 @@
               <div class="row"><button class="primary" type="submit">Save link</button><button type="button" class="link" data-linkedit="${s.id}">Cancel</button></div>
               <p class="note">Your buddy sees the new link right away.</p></form>` : ''}
             <div class="row"><button data-cal="${s.id}" aria-expanded="${calOpen === s.id}">Save in calendar</button><button class="danger" data-cancel="${s.id}">Cancel dyad</button></div>
-            ${calOpen === s.id ? `<div class="cal-options">
-              ${C.canDownloadIcs() ? `<button data-ics="${s.id}">Apple Calendar or Outlook app</button>` : ''}
-              <a class="btn" href="${esc(C.googleUrl(s, me, other))}" target="_blank" rel="noopener noreferrer">Google Calendar</a>
-              <a class="btn" href="${esc(C.outlookUrl(s, me, other))}" target="_blank" rel="noopener noreferrer">Outlook.com</a>
-              ${C.canDownloadIcs() ? '' : `<p class="note">Apple Calendar files work once the app is live. In this preview, use Google or Outlook.</p>`}
-            </div>` : ''}</li>`; }).join('')}</ul>`
+            ${calOpen === s.id ? calOptions(s.id, C.dyadEntry(s, me, other)) : ''}</li>`; }).join('')}</ul>`
           : `<p class="empty">Nothing booked yet. Book one of your matches below.</p>`}
       </section>
 
@@ -223,6 +239,63 @@
       </section>`;
   }
 
+  /* ---------- community events ---------- */
+  const DURATIONS = [30, 45, 60, 90, 120, 180];
+  const durLabel = m => m < 60 ? `${m} min` : (m % 60 ? `${Math.floor(m/60)} h ${m % 60} min` : `${m/60} h`);
+  function eventsSection(events, me, { byId = {}, participants = [] }){
+    const admin = !!(me && me.isAdmin);
+    if(!events.length && !admin) return '';
+    const todayISO = new Date(Date.now() - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
+    const form = !evFormOpen ? '' : `
+      <form class="form callout ev-form" id="evForm" style="max-width:none">
+        <label class="field">Title<input name="title" required maxlength="120" autocomplete="off" placeholder="Community dyad evening"></label>
+        <div class="two">
+          <label class="field">Hosted by<input name="host" maxlength="80" autocomplete="off" value="${esc(me.name.split(' ')[0])}"></label>
+          <label class="field">Places (optional)<input name="capacity" type="number" inputmode="numeric" min="1" max="1000" placeholder="No limit"></label>
+        </div>
+        <div class="three">
+          <label class="field">Date<input name="date" type="date" required min="${todayISO}"></label>
+          <label class="field">Start<input name="time" type="time" required step="900" value="19:00"></label>
+          <label class="field">Length<select name="durationMin">${DURATIONS.map(d => `<option value="${d}" ${d === 90 ? 'selected' : ''}>${durLabel(d)}</option>`).join('')}</select></label>
+        </div>
+        <label class="field">Video call link (optional)<input name="meetingUrl" type="text" inputmode="url" maxlength="400" placeholder="https://" autocomplete="off"><span class="note">Only people who join see the link.</span></label>
+        <label class="field">Description (optional)<textarea name="description" maxlength="1500"></textarea></label>
+        <div class="row"><button class="primary" type="submit">Publish event</button><button type="button" class="link" id="evCancel">Cancel</button></div>
+        <p class="note">Times are in your time zone (${esc(myTz.replace(/_/g,' '))}). Everyone sees them in their own.</p>
+      </form>`;
+
+    const item = e => {
+      const full = e.capacity && e.going >= e.capacity, left = e.capacity ? e.capacity - e.going : null;
+      const key = 'ev:' + e.id;
+      let actions;
+      if(!me) actions = `<a class="btn" href="#account">Sign in to join</a>`;
+      else if(e.iAmGoing) actions = `${e.meetingUrl ? `<a class="btn primary" href="${esc(e.meetingUrl)}" target="_blank" rel="noopener noreferrer">Join video call</a>` : ''}
+        <button data-cal="${key}" aria-expanded="${calOpen === key}">Save in calendar</button><button class="link danger" data-leave="${e.id}">I can't make it</button>`;
+      else if(full) actions = `<button disabled>Full</button>`;
+      else actions = `<button class="primary" data-join="${e.id}">Join</button>`;
+      return `<li class="event">
+        <div class="slot-row"><span class="when">${esc(M.rangeLabel(e.start, e.durationMin))}</span>${e.iAmGoing ? `<span class="tag ok">You're going</span>` : ''}</div>
+        <div class="ev-title">${esc(e.title)}</div>
+        ${e.host ? `<div class="meta">with ${esc(e.host)}</div>` : ''}
+        ${e.description ? `<p class="ev-desc">${esc(e.description)}</p>` : ''}
+        <div class="meta">${e.going} going${left !== null ? ` · ${full ? 'full' : `${left} place${left === 1 ? '' : 's'} left`}` : ''}</div>
+        <div class="row">${actions}</div>
+        ${e.iAmGoing && calOpen === key ? calOptions(key, C.eventEntry(e)) : ''}
+        ${admin ? `<div class="admin-row">
+          <button class="link" data-parts="${e.id}" aria-expanded="${partsOpen === e.id}">${partsOpen === e.id ? 'Hide participants' : `Participants (${e.going})`}</button>
+          ${!e.iAmGoing && e.meetingUrl ? `<span class="meta">Call link: ${esc(host(e.meetingUrl))}</span>` : ''}
+          <span style="flex:1"></span><button class="link danger" data-evdel="${e.id}">Cancel event</button></div>
+          ${partsOpen === e.id ? (participants.length ? `<ul class="parts">${participants.map(p => { const who = byId[p.userId]; return `<li>${avatar(who)}<span>${who ? esc(who.name) : 'Former participant'}</span></li>`; }).join('')}</ul>`
+            : `<p class="note">Nobody has joined yet.</p>`) : ''}` : ''}
+      </li>`;
+    };
+
+    return `<section class="section"><div class="section-head"><h2>Community events</h2>${admin && !evFormOpen ? `<button class="link" id="evNew">+ New event</button>` : ''}</div>
+      ${form}
+      ${events.length ? `<ul class="list">${events.map(item).join('')}</ul>` : `<p class="empty">No events planned. Create one with “New event”.</p>`}
+    </section>`;
+  }
+
   // One delegated handler for the buddy view.
   $('view-buddy').addEventListener('click', async e => {
     const t = e.target.closest('button'); if(!t) return;
@@ -249,19 +322,28 @@
     }
     if(t.dataset.linkedit){ linkEdit = linkEdit === t.dataset.linkedit ? null : t.dataset.linkedit; await renderBuddy(); const i = document.querySelector('.link-form input'); if(i){ i.focus(); i.select(); } return; }
     if(t.dataset.cal){ calOpen = calOpen === t.dataset.cal ? null : t.dataset.cal; return renderBuddy(); }
-    if(t.dataset.ics){
-      const [people, sessions] = await Promise.all([S.people(), S.sessions()]);
-      const s = sessions.find(x => x.id === t.dataset.ics), me = S.auth.current(); if(!s) return;
-      const other = people.find(p => p.id === (s.a === me.id ? s.b : s.a));
-      C.downloadIcs(s, me, other); toast('Calendar file saved. Open it to add the dyad.');
-      return;
-    }
+    if(t.id === 'evNew'){ evFormOpen = true; await renderBuddy(); document.querySelector('#evForm [name=title]').focus(); return; }
+    if(t.id === 'evCancel'){ evFormOpen = false; return renderBuddy(); }
+    if(t.dataset.join){ t.disabled = true; return attempt(() => S.joinEvent(t.dataset.join), 'You\u2019re in. See you there.').then(ok => { if(!ok) t.disabled = false; }); }
+    if(t.dataset.leave){ if(!armed(t, 'Tap again to withdraw')) return; return attempt(() => S.leaveEvent(t.dataset.leave), 'You\u2019re no longer going.'); }
+    if(t.dataset.parts){ partsOpen = partsOpen === t.dataset.parts ? null : t.dataset.parts; return renderBuddy(); }
+    if(t.dataset.evdel){ if(!armed(t, 'Tap again to cancel the event')) return; return attempt(() => S.deleteEvent(t.dataset.evdel), 'Event cancelled.'); }
     if(t.dataset.cancel){
       if(!armed(t, 'Tap again to cancel')) return;
       return attempt(() => S.cancel(t.dataset.cancel), 'Dyad cancelled.');
     }
   });
   $('view-buddy').addEventListener('submit', async e => {
+    if(e.target.id === 'evForm'){
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target));
+      const start = f.date && f.time ? new Date(`${f.date}T${f.time}`).toISOString() : '';
+      const btn = e.target.querySelector('[type=submit]'); btn.disabled = true;
+      const ok = await attempt(() => S.createEvent({ ...f, start }), 'Event published.');
+      btn.disabled = false;
+      if(ok){ evFormOpen = false; renderBuddy(); }
+      return;
+    }
     const f = e.target.closest('[data-linkform]'); if(!f) return;
     e.preventDefault();
     const url = new FormData(f).get('url');
@@ -271,7 +353,28 @@
   window.addEventListener('pagehide', () => { if(pending) S.setAvailability(pending); });
 
   /* ================= INSPIRATION ================= */
-  let filter = 'all', formOpen = false, openItem = null;
+  let filter = 'all', formOpen = false, openItem = null, pendingImage = null;   // pendingImage: { blob, url } for the form
+
+  // Shrink an image before upload: longest side at most 1200 px, JPEG.
+  function resizeImage(file, max = 1200){
+    return new Promise((res, rej) => {
+      if(!file || !/^image\//.test(file.type)) return rej(new Error('Please choose an image file (JPG, PNG or WebP).'));
+      const url = URL.createObjectURL(file), img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+        const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(b => b ? res(b) : rej(new Error('That image couldn\u2019t be prepared. Try another one.')), 'image/jpeg', 0.82);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('That image couldn\u2019t be opened. Try a JPG or PNG.')); };
+      img.src = url;
+    });
+  }
+  const imagePickerInner = () => pendingImage
+    ? `<img src="${esc(pendingImage.url)}" alt=""><div class="row"><label class="btn" for="inspImage">Change image</label><button type="button" class="link danger" id="inspImageRemove">Remove image</button></div>`
+    : `<label class="btn" for="inspImage">Add an image</label><span class="note">A cover, a still or a photo. Shown in the tile view.</span>`;
   let layout = (() => { try{ return localStorage.getItem('breakthrough.layout') || 'list'; }catch(e){ return 'list'; } })();
   const setLayout = v => { layout = v; try{ localStorage.setItem('breakthrough.layout', v); }catch(e){} };
 
@@ -279,7 +382,7 @@
     const el = $('view-inspiration'), me = S.auth.current();
     const [items, people] = await Promise.all([S.inspiration(), S.people()]);
     const byId = Object.fromEntries(people.map(p => [p.id, p]));
-    const crumb = `<div class="crumb">Breakthrough Intensive <span>/</span> Inspiration</div>`;
+    const crumb = `<div class="crumb">Breakthrough Online <span>/</span> Inspiration</div>`;
     const by = i => { const a = byId[i.authorId]; return `${a ? esc(a.name.split(' ')[0]) : 'Someone'} · ${esc(dateFmt.format(new Date(i.createdAt)))}`; };
 
     // ---- one entry ----
@@ -293,6 +396,7 @@
           <span class="tag">${esc(typeLabel(item.type))}</span>
           <h1>${esc(item.title)}</h1>
           ${item.creator ? `<p class="by">${esc(item.creator)}</p>` : ''}
+          ${item.imageUrl ? `<img class="detail-img" src="${esc(item.imageUrl)}" alt="">` : ''}
           ${item.note ? `<p class="why">${esc(item.note)}</p>` : `<p class="empty">No note added.</p>`}
           ${item.link ? `<div class="row"><a class="btn primary" href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">Open link</a><span class="meta">${esc(host(item.link))}</span></div>` : ''}
           <hr>
@@ -325,6 +429,10 @@
             <label class="field">Link (optional)<input name="link" type="url" inputmode="url" maxlength="400" placeholder="https://" autocomplete="off"></label>
           </div>
           <label class="field">Why it's worth it (optional)<textarea name="note" maxlength="600"></textarea></label>
+          <div class="field">Image (optional)
+            <div class="img-pick" id="inspImagePick">${imagePickerInner()}</div>
+            <input type="file" id="inspImage" accept="image/jpeg,image/png,image/webp" hidden>
+          </div>
           <div class="row"><button class="primary" type="submit">Add to board</button><button type="button" class="link" id="inspCancel">Cancel</button></div>
         </form>` : `<div class="row"><button class="primary" id="inspOpen">Add inspiration</button></div>`)
         : signInPrompt('Sign in to add something to the board. You can always remove your own entries.')}
@@ -342,12 +450,15 @@
 
       ${!shown.length ? `<p class="empty">${items.length ? 'Nothing in this category yet.' : 'The board is empty. ' + (me ? 'Be the first to add something.' : '')}</p>`
         : layout === 'tiles' ? `<div class="board">${shown.map(i => `
-          <button class="card" data-open="${i.id}">
-            <span class="tag">${esc(typeLabel(i.type))}</span>
-            <span class="title">${esc(i.title)}</span>
-            ${i.creator ? `<span class="by">${esc(i.creator)}</span>` : ''}
-            ${i.note ? `<span class="why clamp">${esc(i.note)}</span>` : ''}
-            <span class="foot"><span>${by(i)}</span>${i.link ? `<span>${esc(host(i.link))}</span>` : ''}</span>
+          <button class="card${i.imageUrl ? ' has-img' : ''}" data-open="${i.id}">
+            ${i.imageUrl ? `<img class="card-img" src="${esc(i.imageUrl)}" alt="" loading="lazy">` : ''}
+            <span class="card-body">
+              <span class="tag">${esc(typeLabel(i.type))}</span>
+              <span class="title">${esc(i.title)}</span>
+              ${i.creator ? `<span class="by">${esc(i.creator)}</span>` : ''}
+              ${i.note ? `<span class="why clamp">${esc(i.note)}</span>` : ''}
+              <span class="foot"><span>${by(i)}</span>${i.link ? `<span>${esc(host(i.link))}</span>` : ''}</span>
+            </span>
           </button>`).join('')}</div>`
         : `<ul class="list ilist">${shown.map(i => `
           <li><button class="irow" data-open="${i.id}">
@@ -364,18 +475,31 @@
     if(t.dataset.layout){ setLayout(t.dataset.layout); return renderInspiration(); }
     if(t.dataset.filter){ filter = t.dataset.filter; return renderInspiration(); }
     if(t.id === 'inspOpen'){ formOpen = true; await renderInspiration(); document.querySelector('#inspForm [name=title]').focus(); return; }
-    if(t.id === 'inspCancel'){ formOpen = false; return renderInspiration(); }
+    if(t.id === 'inspCancel'){ formOpen = false; clearPendingImage(); return renderInspiration(); }
+    if(t.id === 'inspImageRemove'){ clearPendingImage(); $('inspImagePick').innerHTML = imagePickerInner(); return; }
     if(t.dataset.remove){
       if(!armed(t, 'Tap again to remove')) return;
       if(await attempt(() => S.removeInspiration(t.dataset.remove), 'Removed.')){ openItem = null; renderInspiration(); }
     }
   });
+  function clearPendingImage(){ if(pendingImage) URL.revokeObjectURL(pendingImage.url); pendingImage = null; }
+  // Picking an image updates only the preview, so nothing typed in the form is lost.
+  $('view-inspiration').addEventListener('change', async e => {
+    if(e.target.id !== 'inspImage') return;
+    const file = e.target.files && e.target.files[0]; e.target.value = '';
+    if(!file) return;
+    try{ const blob = await resizeImage(file); clearPendingImage(); pendingImage = { blob, url: URL.createObjectURL(blob) }; }
+    catch(err){ toast(err.message); }
+    $('inspImagePick').innerHTML = imagePickerInner();
+  });
   $('view-inspiration').addEventListener('submit', async e => {
     if(e.target.id !== 'inspForm') return;
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    const ok = await attempt(() => S.addInspiration(f), 'Added to the board.');
-    if(ok){ formOpen = false; filter = 'all'; renderInspiration(); }
+    const btn = e.target.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = pendingImage ? 'Uploading…' : 'Adding…';
+    const ok = await attempt(() => S.addInspiration({ ...f, image: pendingImage ? pendingImage.blob : null }), 'Added to the board.');
+    if(ok){ formOpen = false; filter = 'all'; clearPendingImage(); renderInspiration(); }
+    else { btn.disabled = false; btn.textContent = 'Add to board'; }
   });
 
   /* ================= ACCOUNT ================= */
@@ -391,21 +515,98 @@
       <div class="row"><button id="devSeed">Add sample participants</button><button class="link danger" id="devReset">Reset all local data</button></div>
     </section>`;
 
-  async function renderAccount(){
-    const el = $('view-account'), me = S.auth.current();
-    const head = `<div class="crumb">Breakthrough Intensive <span>/</span> Account</div>`;
+  /* ---------- theme (per device) ---------- */
+  const THEMES = [['light', 'Light'], ['dark', 'Dark'], ['auto', 'Automatic']];
+  const getTheme = () => { try{ const t = localStorage.getItem('breakthrough.theme'); return t === 'light' || t === 'dark' ? t : 'auto'; }catch(e){ return 'auto'; } };
+  function setTheme(t){
+    try{ localStorage.setItem('breakthrough.theme', t); }catch(e){}
+    t === 'auto' ? document.documentElement.removeAttribute('data-theme') : document.documentElement.setAttribute('data-theme', t);
+  }
 
-    if(!me){
+  let resetSentTo = '';
+  async function renderAccount(){
+    const el = $('view-account'), me = S.auth.current(), sub = route;
+    const n = S.unreadCount();
+    const subnav = `<nav class="subnav" aria-label="Account">
+        <a href="#account" ${sub === 'account' ? 'aria-current="page"' : ''}>${me ? 'Profile' : 'Sign in'}</a>
+        <a href="#notifications" ${sub === 'notifications' ? 'aria-current="page"' : ''}>Notifications${n ? ` <span class="badge">${n}</span>` : ''}</a>
+        <a href="#settings" ${sub === 'settings' ? 'aria-current="page"' : ''}>Settings</a>
+      </nav>`;
+    const head = `<div class="crumb">Breakthrough Online <span>/</span> Account</div>` + subnav;
+
+    // Arrived from a password-reset email.
+    if(S.recovering){
+      el.innerHTML = `<div class="crumb">Breakthrough Online <span>/</span> Account</div>
+        <h1>Set a new password</h1>
+        <p class="lede">Choose a new password for ${me ? esc(me.email) : 'your account'}.</p>
+        <form class="form" id="newPwForm">
+          <label class="field">New password<input name="password" type="password" required minlength="6" autocomplete="new-password"><span class="note">At least 6 characters</span></label>
+          <div class="row"><button class="primary" type="submit">Save new password</button><button type="button" class="link" id="recoveryCancel">Not now</button></div>
+        </form>`;
+      return;
+    }
+
+    // ----- Settings -----
+    if(sub === 'settings'){
+      const cur = getTheme();
       el.innerHTML = head + `
-        <h1>${authMode === 'signin' ? 'Sign in' : 'Create your account'}</h1>
-        <p class="lede">You need an account to find a dyad buddy or share inspiration. Browsing the board and using the timer work without one.</p>
+        <h1>Settings</h1>
+        <section class="section"><h2>Appearance</h2>
+          <div class="choice" role="radiogroup" aria-label="Appearance">
+            ${THEMES.map(([v, l]) => `<label class="opt"><input type="radio" name="theme" value="${v}" ${cur === v ? 'checked' : ''}><span class="swatch ${v}" aria-hidden="true"></span><span>${l}</span></label>`).join('')}
+          </div>
+          <p class="note">Automatic follows your device's light or dark setting. This is saved on this device only.</p>
+        </section>
+        ${me && S.needsPassword ? `<section class="section"><h2>Password</h2>
+          <form class="form" id="changePwForm">
+            <label class="field">New password<input name="password" type="password" required minlength="6" autocomplete="new-password"><span class="note">At least 6 characters</span></label>
+            <div class="row"><button type="submit">Change password</button></div>
+          </form></section>` : ''}
+        ${me ? `<section class="section"><h2>Account</h2>
+          <div class="row"><button id="signOut">Sign out</button><span style="flex:1"></span><button class="link danger" id="delAcct">Delete account</button></div>
+          <p class="note">Deleting removes your profile, availability, booked dyads and board entries.</p></section>` : ''}`;
+      return;
+    }
+
+    // ----- Notifications -----
+    if(sub === 'notifications'){
+      if(!me){ el.innerHTML = head + `<h1>Notifications</h1>` + signInPrompt('Sign in to see when someone matches your hours, books a dyad with you or cancels.'); return; }
+      const [notes, people] = await Promise.all([S.notifications(), S.people()]);
+      const byId = Object.fromEntries(people.map(p => [p.id, p]));
+      if(seenUnread === null){ seenUnread = new Set(notes.filter(x => !x.read).map(x => x.id)); if(seenUnread.size) S.markAllRead(); }
+      el.innerHTML = head + `
+        <h1>Notifications</h1>
+        ${notes.length ? `<ul class="list notes">${notes.map(x => `
+          <li class="${seenUnread.has(x.id) ? 'unread' : ''}">
+            <div class="note-kind tag ${x.kind === 'booked' ? 'ok' : ''}">${{ match:'New match', booked:'Dyad booked', cancelled:'Cancelled' }[x.kind] || 'Update'}</div>
+            <div>${noteText(x, byId)}</div>
+            <div class="row"><span class="meta">${esc(dateFmt.format(new Date(x.createdAt)))}</span>${x.kind !== 'cancelled' ? `<a class="link-inline" href="#buddy">${x.kind === 'match' ? 'See matches' : 'View dyad'}</a>` : ''}</div>
+          </li>`).join('')}</ul>`
+          : `<p class="empty">Nothing yet. When someone matches your hours, books a dyad with you or cancels, it shows up here.</p>`}`;
+      return;
+    }
+
+    // ----- Profile, or sign in / sign up / forgot password -----
+    if(!me){
+      const title = { signin:'Sign in', signup:'Create your account', forgot:'Reset your password' }[authMode];
+      el.innerHTML = head + `
+        <h1>${title}</h1>
+        ${authMode === 'forgot' ? '' : `<p class="lede">You need an account to find a dyad buddy, join events or share inspiration. Browsing the board and using the timer work without one.</p>`}
         ${authMode === 'signin' ? `
           <form class="form" id="signinForm">
             <label class="field">Email<input name="email" type="email" required autocomplete="email" inputmode="email"></label>
             ${S.needsPassword ? `<label class="field">Password<input name="password" type="password" required autocomplete="current-password"></label>` : ''}
-            <div class="row"><button class="primary" type="submit">Sign in</button><button type="button" class="link" data-mode="signup">New here? Create an account</button></div>
+            <div class="row"><button class="primary" type="submit">Sign in</button>${S.needsPassword ? `<button type="button" class="link" data-mode="forgot">Forgot password?</button>` : ''}</div>
+            <div class="row"><button type="button" class="link" data-mode="signup">New here? Create an account</button></div>
             ${S.needsPassword ? '' : `<p class="note">This preview keeps everything in your browser, so there's no password.</p>`}
-          </form>` : `
+          </form>` : authMode === 'forgot' ? `
+          <p class="lede">Enter the email you signed up with and we'll send you a link to set a new password.</p>
+          ${resetSentTo ? `<div class="callout ok"><p>If there's an account for <strong>${esc(resetSentTo)}</strong>, a reset link is on its way. Check your inbox and spam folder.</p></div>` : `
+          <form class="form" id="forgotForm">
+            <label class="field">Email<input name="email" type="email" required autocomplete="email" inputmode="email"></label>
+            <div class="row"><button class="primary" type="submit">Send reset link</button></div>
+          </form>`}
+          <div class="row"><button type="button" class="link" data-mode="signin">Back to sign in</button></div>` : `
           <form class="form" id="signupForm">
             <label class="field">Name<input name="name" required maxlength="60" autocomplete="name"></label>
             <label class="field">Email<input name="email" type="email" required autocomplete="email" inputmode="email"></label>
@@ -437,18 +638,18 @@
         <div class="row"><button class="primary" type="submit">Save</button></div>
         <p class="note">Other participants see your photo, name, question and time zone. Your email stays private.</p>
       </form>
-      <hr>
-      <div class="row"><button id="signOut">Sign out</button><span style="flex:1"></span><button class="link danger" id="delAcct">Delete account</button></div>
       ${devTools}`;
   }
 
   $('view-account').addEventListener('click', async e => {
     const t = e.target.closest('button'); if(!t) return;
-    if(t.dataset.mode){ authMode = t.dataset.mode; return renderAccount(); }
+    if(t.dataset.mode){ authMode = t.dataset.mode; resetSentTo = ''; return renderAccount(); }
+    if(t.id === 'recoveryCancel'){ S.auth.cancelRecovery(); location.hash = '#home'; return; }
     if(t.id === 'signOut'){ await flushAvailability(); return attempt(() => S.auth.signOut(), 'Signed out.'); }
     if(t.id === 'delAcct'){
       if(!armed(t, 'Tap again to delete everything')) return;
-      return attempt(() => S.auth.deleteAccount(), 'Account deleted.');
+      if(await attempt(() => S.auth.deleteAccount(), 'Account deleted.')) location.hash = '#home';
+      return;
     }
     if(t.id === 'photoRemove'){ if(!armed(t, 'Tap again to remove')) return; return attempt(() => S.auth.update({ photo:'' }), 'Photo removed.'); }
     if(t.id === 'devSeed') return attempt(() => S.dev.seed(), 'Sample participants added. Check Find a buddy.');
@@ -470,6 +671,7 @@
     });
   }
   $('view-account').addEventListener('change', async e => {
+    if(e.target.name === 'theme'){ setTheme(e.target.value); toast(`Appearance: ${THEMES.find(x => x[0] === e.target.value)[1]}.`); return; }
     if(e.target.id !== 'photoInput') return;
     const file = e.target.files && e.target.files[0]; e.target.value = '';
     await attempt(async () => S.auth.update({ photo: await squarePhoto(file) }), 'Photo saved.');
@@ -479,6 +681,9 @@
     const f = Object.fromEntries(new FormData(e.target));
     if(e.target.id === 'signinForm'){ if(await attempt(() => S.auth.signIn(f.email, f.password), 'Welcome back.')) location.hash = '#buddy'; }
     if(e.target.id === 'signupForm'){ if(await attempt(() => S.auth.signUp(f), 'Account created.')) location.hash = '#buddy'; }
+    if(e.target.id === 'forgotForm'){ if(await attempt(() => S.auth.requestPasswordReset(f.email))){ resetSentTo = f.email.trim(); renderAccount(); } }
+    if(e.target.id === 'newPwForm'){ if(await attempt(() => S.auth.setNewPassword(f.password), 'Password changed. You\u2019re signed in.')) location.hash = '#home'; }
+    if(e.target.id === 'changePwForm'){ if(await attempt(() => S.auth.setNewPassword(f.password), 'Password changed.')) e.target.reset(); }
     if(e.target.id === 'profileForm') attempt(() => S.auth.update({ name:f.name.trim(), question:f.question, timezone:f.timezone, lookingForBuddy:!!f.lookingForBuddy }), 'Saved.');
   });
 
@@ -492,10 +697,10 @@
         if(route === 'home') await renderHome();
         else if(route === 'buddy') await renderBuddy();
         else if(route === 'inspiration') await renderInspiration();
-        else if(route === 'account') await renderAccount();
+        else if(viewOf(route) === 'account') await renderAccount();
       }catch(e){
         console.error(e);
-        if(route !== 'timer') $('view-' + route).innerHTML = `<div class="callout"><p>${esc(e.message || 'Something went wrong.')}</p><div class="row"><button id="retryLoad">Try again</button></div></div>`;
+        if(route !== 'timer') $('view-' + viewOf(route)).innerHTML = `<div class="callout"><p>${esc(e.message || 'Something went wrong.')}</p><div class="row"><button id="retryLoad">Try again</button></div></div>`;
       }
     });
   }

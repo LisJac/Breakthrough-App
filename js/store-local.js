@@ -13,7 +13,7 @@
   const SESSION = 'dyadbuddy.session';
   const listeners = new Set();
 
-  const empty = () => ({ users:[], availability:{}, sessions:[], inspiration:[], notifications:[], notified:{} });
+  const empty = () => ({ users:[], availability:{}, sessions:[], inspiration:[], notifications:[], notified:{}, events:[] });
   function load(){
     try{ return Object.assign(empty(), JSON.parse(localStorage.getItem(KEY)) || {}); }
     catch(e){ return empty(); }
@@ -63,11 +63,12 @@
 
   const Store = {
     mode: 'local',
+    recovering: false,
     subscribe(fn){ listeners.add(fn); return () => listeners.delete(fn); },
 
     /* ---------- accounts ---------- */
     auth: {
-      current(){ return me() ? clone(me()) : null; },
+      current(){ return me() ? Object.assign(clone(me()), { isAdmin:true }) : null; },   // in the preview everyone may create events
       // Local mode has no passwords. At deploy this becomes an email sign-in link.
       async signIn(email){
         const u = db.users.find(x => x.email === normEmail(email));
@@ -84,6 +85,7 @@
         db.users.push(u); setSession(u.id); save(); return tick(u);
       },
       async signOut(){ setSession(null); emit(); },
+      cancelRecovery(){},
       async update(patch){
         const u = requireMe();
         if('photo' in patch && patch.photo && !/^data:image\/(jpeg|png|webp);base64,/.test(patch.photo)) throw new Error('That photo couldn\u2019t be saved.');
@@ -101,6 +103,7 @@
         });
         db.sessions = db.sessions.filter(s => s.a !== u.id && s.b !== u.id);
         db.inspiration = db.inspiration.filter(x => x.authorId !== u.id);
+        (db.events || []).forEach(e => e.signups = e.signups.filter(x => x.userId !== u.id));
         db.notifications = db.notifications.filter(n => n.userId !== u.id);
         setSession(null); save();
       }
@@ -156,12 +159,13 @@
 
     /* ---------- inspiration board (anyone reads, members post, authors delete) ---------- */
     async inspiration(){ return tick(db.inspiration.slice().sort((a,b) => b.createdAt.localeCompare(a.createdAt))); },
-    async addInspiration({ type, title, creator, link, note }){
+    async addInspiration({ type, title, creator, link, note, image }){
       const u = requireMe();
       title = String(title || '').trim();
       if(!title) throw new Error('Please add a title.');
       if(link && !/^https?:\/\//i.test(link)) link = 'https://' + link;
-      const item = { id:uid(), type:type || 'book', title, creator:String(creator||'').trim(), link:String(link||'').trim(), note:String(note||'').trim(), authorId:u.id, createdAt:new Date().toISOString() };
+      const imageUrl = image ? await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(image); }) : '';
+      const item = { id:uid(), type:type || 'book', title, creator:String(creator||'').trim(), link:String(link||'').trim(), note:String(note||'').trim(), imageUrl, authorId:u.id, createdAt:new Date().toISOString() };
       db.inspiration.push(item); save(); return tick(item);
     },
     async removeInspiration(id){
@@ -171,6 +175,39 @@
       if(item.authorId !== u.id) throw new Error('You can only remove your own entries.');
       db.inspiration = db.inspiration.filter(x => x.id !== id); save();
     },
+
+    /* ---------- community events ---------- */
+    async events(){
+      const u = me(), now = Date.now();
+      return tick((db.events || []).filter(e => Date.parse(e.start) + e.durationMin * 60e3 > now)
+        .sort((a, b) => a.start.localeCompare(b.start))
+        .map(e => { const going = e.signups.some(x => u && x.userId === u.id);
+          return { id:e.id, title:e.title, host:e.host, description:e.description, start:e.start, durationMin:e.durationMin, capacity:e.capacity,
+                   meetingUrl: u ? e.meetingUrl : '', going:e.signups.length, iAmGoing:going }; }));
+    },
+    async joinEvent(id){
+      const u = requireMe(), e = (db.events || []).find(x => x.id === id);
+      if(!e) throw new Error('This event is no longer open.');
+      if(e.signups.some(x => x.userId === u.id)) return;
+      if(e.capacity && e.signups.length >= e.capacity) throw new Error('This event is full.');
+      e.signups.push({ userId:u.id, createdAt:new Date().toISOString() }); save();
+    },
+    async leaveEvent(id){
+      const u = requireMe(), e = (db.events || []).find(x => x.id === id); if(!e) return;
+      e.signups = e.signups.filter(x => x.userId !== u.id); save();
+    },
+    async createEvent({ title, host, start, durationMin, meetingUrl, capacity, description }){
+      requireMe();
+      title = String(title || '').trim(); if(!title) throw new Error('Please add a title.');
+      if(!start || isNaN(Date.parse(start))) throw new Error('Please pick a date and start time.');
+      if(Date.parse(start) < Date.now()) throw new Error('That start time has already passed.');
+      meetingUrl = String(meetingUrl || '').trim(); if(meetingUrl && !/^https?:\/\//i.test(meetingUrl)) meetingUrl = 'https://' + meetingUrl;
+      (db.events = db.events || []).push({ id:uid(), title, host:String(host||'').trim(), description:String(description||'').trim(), start,
+        durationMin:+durationMin || 60, meetingUrl, capacity: capacity ? +capacity : null, signups:[] });
+      save();
+    },
+    async deleteEvent(id){ requireMe(); db.events = (db.events || []).filter(e => e.id !== id); save(); },
+    async eventParticipants(id){ requireMe(); const e = (db.events || []).find(x => x.id === id); return tick(e ? e.signups : []); },
 
     /* ---------- local testing only ---------- */
     dev: {

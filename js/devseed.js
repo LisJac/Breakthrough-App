@@ -26,6 +26,14 @@
       { type:'book', title:'Who Am I?', creator:'Ramana Maharshi', link:'', note:'Sample entry. A short text on the question itself.', authorId:author2.id },
       { type:'film', title:'Samsara', creator:'Ron Fricke', link:'', note:'Sample entry. Wordless film, good after a long day of dyads.', authorId:author.id }
     ];
+    db.events = db.events || [];
+    if(!db.events.some(e => /\(sample\)/.test(e.title))){
+      const start = M.slotFor(M.addDays(M.startOfDay(new Date()), 5), 19);
+      db.events.push({ id:uid(), title:'Community dyad evening (sample)', host:'Frances', start, durationMin:90, capacity:20,
+        description:'Sample event. An evening of dyads together online, with a short talk at the start. Bring your question.',
+        meetingUrl:'https://meet.jit.si/breakthrough-community-sample',
+        signups:[author, author2].map(a => ({ userId:a.id, createdAt:new Date().toISOString() })) });
+    }
     items.forEach((it, i) => {
       if(db.inspiration.some(x => x.title === it.title)) return;
       db.inspiration.push(Object.assign({ id:uid(), createdAt:new Date(Date.now() - i * 3600e3).toISOString() }, it));

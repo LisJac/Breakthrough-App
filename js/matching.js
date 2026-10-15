@@ -34,10 +34,11 @@
 
   const fmtDay = new Intl.DateTimeFormat('en-GB', { weekday:'short', day:'numeric', month:'short' });
   const fmtTime = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit' });
-  function slotLabel(iso){
-    const d = new Date(iso), e = new Date(d.getTime() + 3600e3);
+  function rangeLabel(iso, minutes){
+    const d = new Date(iso), e = new Date(d.getTime() + minutes * 60e3);
     return `${fmtDay.format(d)} · ${fmtTime.format(d)}–${fmtTime.format(e)}`;
   }
+  const slotLabel = iso => rangeLabel(iso, 60);
   // The same moment in someone else's time zone, e.g. "18:00 London".
   function inZone(iso, tz){
     try{
@@ -46,5 +47,5 @@
     }catch(e){ return ''; }
   }
 
-  window.Matching = { HOURS, DAYS, WEEKS_AHEAD, weekDays, slotFor, hoursList, sharedSlots, matchesFor, slotLabel, inZone, startOfDay, addDays };
+  window.Matching = { HOURS, DAYS, WEEKS_AHEAD, weekDays, slotFor, hoursList, sharedSlots, matchesFor, slotLabel, rangeLabel, inZone, startOfDay, addDays };
 })();

@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Breakthrough App</title>
-<meta name="description" content="Find a dyad partner, share inspiration and run your dyads — for participants of the Breakthrough Intensive.">
-<meta name="theme-color" content="#ffffff">
+<title>Breakthrough Online</title>
+<meta name="description" content="Find a dyad buddy, join community events, share inspiration and run your dyads online, for practitioners of the Breakthrough Intensive.">
+<meta name="theme-color" content="#1C3AFF">
+<script>try{var t=localStorage.getItem('breakthrough.theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@300;400&display=swap">
 <link rel="stylesheet" href="styles.css">
@@ -14,11 +15,11 @@
 
 <header class="top">
   <div class="top-in">
-    <a class="brand" href="#home">Breakthrough <span>App</span></a>
+    <a class="brand" href="#home">Breakthrough <span>Online</span></a>
     <nav class="tabs" aria-label="Main">
       <a href="#buddy" data-tab="buddy">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="9" r="3.2"/><circle cx="16" cy="9" r="3.2"/><path d="M2.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M10.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/></svg>
-        <span>Find a buddy</span><span class="badge" id="navBadge" hidden></span>
+        <span>Find a buddy</span>
       </a>
       <a href="#timer" data-tab="timer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 3h5"/></svg>
@@ -30,14 +31,14 @@
       </a>
       <a href="#account" data-tab="account">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5"/></svg>
-        <span id="navAccount">Account</span>
+        <span id="navAccount">Account</span><span class="badge" id="navBadge" hidden></span>
       </a>
     </nav>
   </div>
 </header>
 
 <main>
-  <!-- Find a buddy, Inspiration and Account are rendered by js/app.js -->
+  <!-- Home, Find a buddy, Inspiration and Account are rendered by js/app.js -->
   <div class="home-wrap" id="view-home" hidden></div>
   <div class="page" id="view-buddy" hidden></div>
   <div class="page" id="view-inspiration" hidden></div>
@@ -45,7 +46,7 @@
 
   <!-- Timer: ported from the Dyad Timer artifact, logic in js/timer.js -->
   <div class="page" id="view-timer" hidden>
-    <div class="crumb">Breakthrough Intensive <span>/</span> Timer</div>
+    <div class="crumb">Breakthrough Online <span>/</span> Timer</div>
 
     <section class="step" id="s1">
       <div class="steplabel"><span class="dots"><b class=on></b><b></b><b></b></span>Step 1 of 3</div>
