@@ -294,3 +294,11 @@ a.link.on-photo:hover{color:#ffffff}
 .sound-opt>span{display:flex;flex-direction:column;min-width:0}
 .sound-name{font-size:15px}
 button.play{min-height:32px;padding:4px 12px;font-size:13px;flex:none}
+
+/* ---------- section headings: larger, with the content right underneath ---------- */
+.section>h2,.section-head h2{font-size:21px;font-weight:500;line-height:1.25;color:var(--fg);letter-spacing:-.01em;margin:0}
+.section>h2{margin-bottom:-4px}
+.section-head{margin-bottom:-4px}
+.section>h2+.list,.section-head+.list{border-top:0}
+#view-buddy{gap:48px}
+#view-buddy>h1+.lede{margin-top:-32px}
