@@ -33,10 +33,11 @@ The schema is in `supabase/migrations/`:
 - `002_functions.sql` holds the server-side logic for matching, booking, cancelling, marking updates read and deleting an account.
 - `003_meeting_link.sql` gives each booked dyad its own video call room.
 - `004_community_events.sql` adds events, sign-ups and the admin list:
-  - Admins are listed by email in `app_admins`. To add Frances, run `insert into public.app_admins (email) values ('her@email');` in the SQL editor.
+  - Admins are listed in the table `app_admins` (see "Who can create events" below).
   - Everyone sees events and how many are going.
   - Only participants and admins see the call link, and only admins see who's going.
 - `006_event_notifications.sql` notifies every member about a new event, notifies new members about upcoming events, and tells participants when an event is cancelled.
+- `008_admins_editable.sql` makes `app_admins` easy to edit by hand: it cleans up emails and adds name and date columns.
 - `007_booking_email.sql` records when the booking email went out, so each booking is emailed only once.
 - `005_inspiration_images.sql` adds the public `inspiration` Storage bucket. Members upload into their own folder.
 
@@ -51,6 +52,17 @@ python3 -m http.server 8000      # then open http://localhost:8000
 ```
 
 Local runs use the shared Supabase database too.
+
+## Who can create events
+
+Only people listed in the Supabase table `app_admins` can create, manage and cancel community events. Everyone else just gets notified.
+
+- **Add someone:**
+  1. In Supabase, open **Table Editor → app_admins → Insert row**.
+  2. Enter their email (the one they sign in with) and optionally their name.
+  3. Click **Save**. Capital letters and spaces are fixed automatically.
+- **Remove someone:** delete their row.
+- The change applies the next time that person opens the app or signs in.
 
 ## Server function
 
