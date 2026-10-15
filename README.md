@@ -37,6 +37,7 @@ The schema is in `supabase/migrations/`:
   - Everyone sees events and how many are going.
   - Only participants and admins see the call link, and only admins see who's going.
 - `006_event_notifications.sql` notifies every member about a new event, notifies new members about upcoming events, and tells participants when an event is cancelled.
+- `007_booking_email.sql` records when the booking email went out, so each booking is emailed only once.
 - `005_inspiration_images.sql` adds the public `inspiration` Storage bucket. Members upload into their own folder.
 
 **Matching:** whenever someone saves their hours, the database finds other people free at the same time and notifies both people once per shared hour. Booking an hour removes it from both people's availability and notifies the other person. Cancelling notifies them too.
@@ -50,6 +51,10 @@ python3 -m http.server 8000      # then open http://localhost:8000
 ```
 
 Local runs use the shared Supabase database too.
+
+## Server function
+
+`supabase/functions/notify-booking` emails the buddy when someone books a dyad with them. The email includes the time in their own time zone, the video call link and a calendar file. It needs the secret `RESEND_API_KEY` from resend.com; without it, bookings still work and show up as in-app notifications. Once a domain is verified in Resend, set `EMAIL_FROM` (e.g. `Breakthrough Online <hello@your-domain.org>`).
 
 ## Still to do
 

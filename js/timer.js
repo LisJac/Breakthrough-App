@@ -259,6 +259,8 @@
   }
   $('go2').onclick=()=>go(2); $('go3').onclick=()=>go(3);
   $('back1').onclick=()=>go(1); $('back2').onclick=()=>go(2);
+  // Step 1: back to wherever the timer was opened from.
+  $('back0').onclick=()=>{ if(history.length > 1) history.back(); else location.hash = '#home'; };
   document.addEventListener('keydown',e=>{ if(e.key==='Enter' && timerVisible() && !$('s1').hidden && e.target===document.body) go(2); });
 
   renderStatic();

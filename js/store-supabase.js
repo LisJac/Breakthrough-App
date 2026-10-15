@@ -163,7 +163,11 @@
     async book(otherId, slot){
       requireMe();
       const { data, error } = await sb.rpc('book_dyad', { other: otherId, slot_at: slot });
-      fail(error); emit(); return data;
+      fail(error);
+      // Email the buddy (best effort; the in-app notification is already there).
+      sb.functions.invoke('notify-booking', { body: { sessionId: data, appUrl: location.origin + location.pathname } })
+        .then(r => { if(r && r.data && r.data.skipped) console.info(r.data.skipped); }).catch(() => {});
+      emit(); return data;
     },
     async setMeetingUrl(sessionId, url){
       requireMe();

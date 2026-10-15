@@ -58,6 +58,10 @@
   function navChrome(){
     const u = S.auth.current(), n = S.unreadCount();
     $('navBadge').hidden = !n; $('navBadge').textContent = n > 9 ? '9+' : n;
+    // With unread notifications, tapping your name opens them directly.
+    const acct = document.querySelector('.tabs a[data-tab="account"]');
+    acct.setAttribute('href', n ? '#notifications' : '#account');
+    acct.setAttribute('aria-label', n ? `${u ? u.name.split(' ')[0] : 'Account'}, ${n} new notification${n === 1 ? '' : 's'}` : (u ? u.name.split(' ')[0] : 'Account'));
     $('navAccount').textContent = u ? u.name.split(' ')[0] : 'Account';
   }
   // "Save in calendar" options for any entry (dyad or event). Entries are kept so the .ics button can find them.
