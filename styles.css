@@ -305,3 +305,11 @@ button.play{min-height:32px;padding:4px 12px;font-size:13px;flex:none}
 .section-intro{margin:0;color:var(--muted);max-width:56ch}
 .section>h2+.list>li:first-child,.section-head+.list>li:first-child,.section-head+form+.list>li:first-child{padding-top:6px}
 .section-head button.link{padding-block:0}
+.tag.accent{color:var(--accent)}
+.page-head{align-items:center;margin-bottom:0}
+.page-head h1{margin:0}
+.notes>li.event{gap:6px}
+.timer-props select{font:inherit;font-size:14px;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:5px 8px;min-width:0;max-width:100%}
+.timer-props select:focus{outline:none;border-color:var(--accent)}
+.timer-props select:disabled{opacity:.6}
+.page-head .btn,.page-head button{white-space:nowrap;flex:none}

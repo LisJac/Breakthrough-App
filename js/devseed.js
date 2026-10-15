@@ -33,6 +33,8 @@
         description:'Sample event. An evening of dyads together online, with a short talk at the start. Bring your question.',
         meetingUrl:'https://meet.jit.si/breakthrough-community-sample',
         signups:[author, author2].map(a => ({ userId:a.id, createdAt:new Date().toISOString() })) });
+      const ev = db.events[db.events.length - 1];
+      db.users.forEach(u => db.notifications.unshift({ id:uid(), userId:u.id, kind:'event', eventId:ev.id, slots:[ev.start], read:false, createdAt:new Date().toISOString() }));
     }
     items.forEach((it, i) => {
       if(db.inspiration.some(x => x.title === it.title)) return;

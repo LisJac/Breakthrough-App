@@ -45,6 +45,15 @@
   }
   function bowl(){ if($('bellOn').checked) strike(getSound()); }
   const bellHold = last => SOUNDS[getSound()].hold + (last ? 1500 : 0);
+  // Sound picker on the Timer tab (also in Settings; both use the same saved choice).
+  const soundSel = $('soundSel');
+  if(soundSel){
+    soundSel.innerHTML = Object.entries(SOUNDS).map(([k, s]) => `<option value="${k}">${s.label}</option>`).join('');
+    const sync = () => { soundSel.value = getSound(); };
+    sync(); window.addEventListener('hashchange', sync);
+    soundSel.addEventListener('change', () => { setSound(soundSel.value); strike(soundSel.value); });
+    $('soundPlay').addEventListener('click', () => strike(soundSel.value));
+  }
   // Used by Settings to list and preview the sounds.
   window.TimerSounds = {
     list: () => Object.entries(SOUNDS).map(([key, s]) => ({ key, label:s.label, hint:s.hint })),

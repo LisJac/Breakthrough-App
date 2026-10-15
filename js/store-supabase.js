@@ -181,7 +181,7 @@
       if(!me) return [];
       const { data, error } = await sb.from('notifications').select('*').order('created_at', { ascending:false }).limit(30);
       fail(error);
-      return (data || []).map(n => ({ id:n.id, userId:n.user_id, kind:n.kind, other:n.other, slots:(n.slots || []).map(iso), note:n.note, read:n.read, createdAt:n.created_at }));
+      return (data || []).map(n => ({ id:n.id, userId:n.user_id, kind:n.kind, other:n.other, slots:(n.slots || []).map(iso), note:n.note, eventId:n.event_id, read:n.read, createdAt:n.created_at }));
     },
     unreadCount(){ return unread; },
     async markAllRead(){ if(!me) return; await sb.rpc('mark_notifications_read'); unread = 0; emit(); },

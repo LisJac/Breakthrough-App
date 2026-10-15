@@ -82,7 +82,10 @@
         if(db.users.some(u => u.email === email)) throw new Error('That email already has an account. Sign in instead.');
         const u = { id:uid(), name, email, question: question || 'Who am I?', timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
                     lookingForBuddy:true, createdAt:new Date().toISOString() };
-        db.users.push(u); setSession(u.id); save(); return tick(u);
+        db.users.push(u);
+        (db.events || []).filter(e => Date.parse(e.start) + e.durationMin * 60e3 > Date.now())
+          .forEach(e => notify(u.id, { kind:'event', eventId:e.id, slots:[e.start] }));
+        setSession(u.id); save(); return tick(u);
       },
       async signOut(){ setSession(null); emit(); },
       cancelRecovery(){},
@@ -202,11 +205,19 @@
       if(!start || isNaN(Date.parse(start))) throw new Error('Please pick a date and start time.');
       if(Date.parse(start) < Date.now()) throw new Error('That start time has already passed.');
       meetingUrl = String(meetingUrl || '').trim(); if(meetingUrl && !/^https?:\/\//i.test(meetingUrl)) meetingUrl = 'https://' + meetingUrl;
-      (db.events = db.events || []).push({ id:uid(), title, host:String(host||'').trim(), description:String(description||'').trim(), start,
+      const id = uid(), creator = me();
+      db.users.filter(x => x.id !== creator.id).forEach(x => notify(x.id, { kind:'event', eventId:id, slots:[start] }));
+      (db.events = db.events || []).push({ id, title, host:String(host||'').trim(), description:String(description||'').trim(), start,
         durationMin:+durationMin || 60, meetingUrl, capacity: capacity ? +capacity : null, signups:[] });
       save();
     },
-    async deleteEvent(id){ requireMe(); db.events = (db.events || []).filter(e => e.id !== id); save(); },
+    async deleteEvent(id){
+      requireMe();
+      const e = (db.events || []).find(x => x.id === id); if(!e) return;
+      e.signups.forEach(x => notify(x.userId, { kind:'event_cancelled', slots:[e.start], note:e.title }));
+      db.notifications = db.notifications.filter(n => n.eventId !== id);
+      db.events = db.events.filter(x => x.id !== id); save();
+    },
     async eventParticipants(id){ requireMe(); const e = (db.events || []).find(x => x.id === id); return tick(e ? e.signups : []); },
 
     /* ---------- local testing only ---------- */

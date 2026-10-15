@@ -5,13 +5,14 @@ A small web app for practitioners of the Breakthrough Intensive:
 1. **Find a buddy**
    - Mark the hours you're free. When someone else is free at the same time, you both get a notification, and either of you can book the slot.
    - Booked dyads come with a video call link and "Save in calendar".
-   - **Community events** (e.g. hosted by Frances) appear at the top. Members join with one tap. Admins create events and see who is going.
+   - **Community events** (e.g. hosted by Frances) arrive as notifications, and members join from there. Admins create and manage events under Account → Events.
 2. **Timer:** the dyad timer with the singing bowl and the recorded instructions.
 3. **Inspiration:** a shared board of books, films, podcasts, talks and practices, with optional images. You can view it as a list or as tiles.
 4. **Account**, with three sections:
    - **Profile:** photo, name, question, time zone and matching visibility.
-   - **Notifications:** matches, bookings and cancellations.
-   - **Settings:** light, dark or automatic appearance; change password; sign out; delete account.
+   - **Notifications:** matches, bookings, cancellations and community events (with a Join button).
+   - **Settings:** light, dark or automatic appearance; timer sound; change password; sign out; delete account.
+   - **Events** (admins only): create events, see participants, cancel.
 
 ## Where the data lives
 
@@ -35,6 +36,7 @@ The schema is in `supabase/migrations/`:
   - Admins are listed by email in `app_admins`. To add Frances, run `insert into public.app_admins (email) values ('her@email');` in the SQL editor.
   - Everyone sees events and how many are going.
   - Only participants and admins see the call link, and only admins see who's going.
+- `006_event_notifications.sql` notifies every member about a new event, notifies new members about upcoming events, and tells participants when an event is cancelled.
 - `005_inspiration_images.sql` adds the public `inspiration` Storage bucket. Members upload into their own folder.
 
 **Matching:** whenever someone saves their hours, the database finds other people free at the same time and notifies both people once per shared hour. Booking an hour removes it from both people's availability and notifies the other person. Cancelling notifies them too.

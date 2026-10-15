@@ -71,6 +71,8 @@
         <dd class="field"><input id="len" type="text" inputmode="numeric" value="4:40" placeholder="4:40" aria-label="Turn length in minutes and seconds"><span class="note">min:sec</span></dd>
         <dt>Total</dt>
         <dd id="total" style="font-variant-numeric:tabular-nums">≈ 39 min</dd>
+        <dt>Sound</dt>
+        <dd class="field"><select id="soundSel" aria-label="Timer sound"></select><button type="button" class="play" id="soundPlay" aria-label="Play the selected sound">▶ Play</button></dd>
       </dl>
 
       <section class="stage" aria-live="polite">
@@ -88,7 +90,6 @@
           <label><input type="checkbox" id="voiceOn" checked> Voice</label>
           <label><input type="checkbox" id="bellOn" checked> Bell</label>
           <button id="testBtn" style="min-height:0;padding:2px 10px;font-size:13px">Test sound</button>
-          <a class="link-inline" href="#settings">Change sound</a>
         </div>
       </section>
 

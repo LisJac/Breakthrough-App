@@ -33,10 +33,10 @@
   }
 
   /* ---------- routing ---------- */
-  const ROUTES = ['home','buddy','inspiration','account','notifications','settings','timer'];
+  const ROUTES = ['home','buddy','inspiration','account','notifications','settings','events','timer'];
   const VIEWS = ['home','buddy','inspiration','account','timer'];
-  const viewOf = r => (r === 'notifications' || r === 'settings') ? 'account' : r;
-  const TITLES = { buddy:'Find a buddy', inspiration:'Inspiration', account:'Account', notifications:'Notifications', settings:'Settings', timer:'Timer' };
+  const viewOf = r => (r === 'notifications' || r === 'settings' || r === 'events') ? 'account' : r;
+  const TITLES = { buddy:'Find a buddy', inspiration:'Inspiration', account:'Account', notifications:'Notifications', settings:'Settings', events:'Events', timer:'Timer' };
   let route = 'home';
   function readRoute(){ const r = (location.hash.replace(/^#\/?/, '') || 'home').split(/[?\/&=]/)[0]; return ROUTES.includes(r) ? r : 'home'; }
   function go(){
@@ -164,17 +164,15 @@
     const head = `<h1>Find a dyad buddy</h1>`;
 
     if(!me){
-      const [n, events] = await Promise.all([S.lookingCount(), S.events()]);
+      const n = await S.lookingCount();
       el.innerHTML = head + `
         <p class="lede">Mark the hours you're free to sit a dyad online. When someone else is free at the same time, you both get a note with the shared slot, and either of you can book it.</p>
         <dl class="props"><dt>Looking now</dt><dd>${n} participant${n === 1 ? '' : 's'}</dd><dt>Format</dt><dd>One hour block · about 40 minutes of dyad, with the timer</dd></dl>
-        ${signInPrompt('You need an account to add your availability, see who you match with and join community events.')}
-        ${eventsSection(events, null, {})}`;
+        ${signInPrompt('You need an account to add your availability, see who you match with and join community events.')}`;
       return;
     }
 
-    const [people, avail, sessions, allSessions, events] = await Promise.all([S.people(), S.allAvailability(), S.sessions(), S.allSessions(), S.events()]);
-    const participants = me.isAdmin && partsOpen ? await S.eventParticipants(partsOpen) : [];
+    const [people, avail, sessions, allSessions] = await Promise.all([S.people(), S.allAvailability(), S.sessions(), S.allSessions()]);
     const byId = Object.fromEntries(people.map(p => [p.id, p]));
     const mine = new Set(pending || avail[me.id] || []);
     const now = Date.now();
@@ -190,8 +188,6 @@
     el.innerHTML = head + `
 
       ${me.lookingForBuddy === false ? `<div class="callout"><p>You're currently hidden from matching.</p><div class="row"><button id="unpause">Show me to others again</button></div></div>` : ''}
-
-      ${eventsSection(events, me, { byId, participants })}
 
       <section class="section"><h2>Your upcoming dyads</h2>
         ${upcoming.length ? `<ul class="list">${upcoming.map(s => { const other = byId[s.a === me.id ? s.b : s.a]; return `
@@ -241,11 +237,35 @@
   /* ---------- community events ---------- */
   const DURATIONS = [30, 45, 60, 90, 120, 180];
   const durLabel = m => m < 60 ? `${m} min` : (m % 60 ? `${Math.floor(m/60)} h ${m % 60} min` : `${m/60} h`);
-  function eventsSection(events, me, { byId = {}, participants = [] }){
-    const admin = !!(me && me.isAdmin);
-    if(!events.length && !admin) return '';
+  // The body of an event card: date, title, host, description, places and actions.
+  function eventBody(e, me, { admin = false, byId = {}, participants = [] } = {}){
+    const full = e.capacity && e.going >= e.capacity, left = e.capacity ? e.capacity - e.going : null;
+    const key = 'ev:' + e.id;
+    let actions;
+    if(!me) actions = `<a class="btn" href="#account">Sign in to join</a>`;
+    else if(e.iAmGoing) actions = `${e.meetingUrl ? `<a class="btn primary" href="${esc(e.meetingUrl)}" target="_blank" rel="noopener noreferrer">Join video call</a>` : ''}
+      <button data-cal="${key}" aria-expanded="${calOpen === key}">Save in calendar</button><button class="link danger" data-leave="${e.id}">I can't make it</button>`;
+    else if(full) actions = `<button disabled>Full</button>`;
+    else actions = `<button class="primary" data-join="${e.id}">Join</button>`;
+    return `
+      <div class="slot-row"><span class="when">${esc(M.rangeLabel(e.start, e.durationMin))}</span>${e.iAmGoing ? `<span class="tag ok">You're going</span>` : ''}</div>
+      <div class="ev-title">${esc(e.title)}</div>
+      ${e.host ? `<div class="meta">with ${esc(e.host)}</div>` : ''}
+      ${e.description ? `<p class="ev-desc">${esc(e.description)}</p>` : ''}
+      <div class="meta">${e.going} going${left !== null ? ` · ${full ? 'full' : `${left} place${left === 1 ? '' : 's'} left`}` : ''}</div>
+      <div class="row">${actions}</div>
+      ${e.iAmGoing && calOpen === key ? calOptions(key, C.eventEntry(e)) : ''}
+      ${admin ? `<div class="admin-row">
+        <button class="link" data-parts="${e.id}" aria-expanded="${partsOpen === e.id}">${partsOpen === e.id ? 'Hide participants' : `Participants (${e.going})`}</button>
+        ${!e.iAmGoing && e.meetingUrl ? `<span class="meta">Call link: ${esc(host(e.meetingUrl))}</span>` : ''}
+        <span style="flex:1"></span><button class="link danger" data-evdel="${e.id}">Cancel event</button></div>
+        ${partsOpen === e.id ? (participants.length ? `<ul class="parts">${participants.map(p => { const who = byId[p.userId]; return `<li>${avatar(who)}<span>${who ? esc(who.name) : 'Former participant'}</span></li>`; }).join('')}</ul>`
+          : `<p class="note">Nobody has joined yet.</p>`) : ''}` : ''}`;
+  }
+
+  function eventForm(me){
     const todayISO = new Date(Date.now() - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
-    const form = !evFormOpen ? '' : `
+    return `
       <form class="form callout ev-form" id="evForm" style="max-width:none">
         <label class="field">Title<input name="title" required maxlength="120" autocomplete="off" placeholder="Community dyad evening"></label>
         <div class="two">
@@ -260,39 +280,8 @@
         <label class="field">Video call link (optional)<input name="meetingUrl" type="text" inputmode="url" maxlength="400" placeholder="https://" autocomplete="off"><span class="note">Only people who join see the link.</span></label>
         <label class="field">Description (optional)<textarea name="description" maxlength="1500"></textarea></label>
         <div class="row"><button class="primary" type="submit">Publish event</button><button type="button" class="link" id="evCancel">Cancel</button></div>
-        <p class="note">Times are in your time zone (${esc(myTz.replace(/_/g,' '))}). Everyone sees them in their own.</p>
+        <p class="note">Every member gets a notification and can join from there. Times are in your time zone (${esc(myTz.replace(/_/g,' '))}); everyone sees them in their own.</p>
       </form>`;
-
-    const item = e => {
-      const full = e.capacity && e.going >= e.capacity, left = e.capacity ? e.capacity - e.going : null;
-      const key = 'ev:' + e.id;
-      let actions;
-      if(!me) actions = `<a class="btn" href="#account">Sign in to join</a>`;
-      else if(e.iAmGoing) actions = `${e.meetingUrl ? `<a class="btn primary" href="${esc(e.meetingUrl)}" target="_blank" rel="noopener noreferrer">Join video call</a>` : ''}
-        <button data-cal="${key}" aria-expanded="${calOpen === key}">Save in calendar</button><button class="link danger" data-leave="${e.id}">I can't make it</button>`;
-      else if(full) actions = `<button disabled>Full</button>`;
-      else actions = `<button class="primary" data-join="${e.id}">Join</button>`;
-      return `<li class="event">
-        <div class="slot-row"><span class="when">${esc(M.rangeLabel(e.start, e.durationMin))}</span>${e.iAmGoing ? `<span class="tag ok">You're going</span>` : ''}</div>
-        <div class="ev-title">${esc(e.title)}</div>
-        ${e.host ? `<div class="meta">with ${esc(e.host)}</div>` : ''}
-        ${e.description ? `<p class="ev-desc">${esc(e.description)}</p>` : ''}
-        <div class="meta">${e.going} going${left !== null ? ` · ${full ? 'full' : `${left} place${left === 1 ? '' : 's'} left`}` : ''}</div>
-        <div class="row">${actions}</div>
-        ${e.iAmGoing && calOpen === key ? calOptions(key, C.eventEntry(e)) : ''}
-        ${admin ? `<div class="admin-row">
-          <button class="link" data-parts="${e.id}" aria-expanded="${partsOpen === e.id}">${partsOpen === e.id ? 'Hide participants' : `Participants (${e.going})`}</button>
-          ${!e.iAmGoing && e.meetingUrl ? `<span class="meta">Call link: ${esc(host(e.meetingUrl))}</span>` : ''}
-          <span style="flex:1"></span><button class="link danger" data-evdel="${e.id}">Cancel event</button></div>
-          ${partsOpen === e.id ? (participants.length ? `<ul class="parts">${participants.map(p => { const who = byId[p.userId]; return `<li>${avatar(who)}<span>${who ? esc(who.name) : 'Former participant'}</span></li>`; }).join('')}</ul>`
-            : `<p class="note">Nobody has joined yet.</p>`) : ''}` : ''}
-      </li>`;
-    };
-
-    return `<section class="section"><div class="section-head"><h2>Community events</h2>${admin && !evFormOpen ? `<button class="link" id="evNew">+ New event</button>` : ''}</div>
-      ${form}
-      ${events.length ? `<ul class="list">${events.map(item).join('')}</ul>` : `<p class="empty">No events planned. Create one with “New event”.</p>`}
-    </section>`;
   }
 
   // One delegated handler for the buddy view.
@@ -321,28 +310,12 @@
     }
     if(t.dataset.linkedit){ linkEdit = linkEdit === t.dataset.linkedit ? null : t.dataset.linkedit; await renderBuddy(); const i = document.querySelector('.link-form input'); if(i){ i.focus(); i.select(); } return; }
     if(t.dataset.cal){ calOpen = calOpen === t.dataset.cal ? null : t.dataset.cal; return renderBuddy(); }
-    if(t.id === 'evNew'){ evFormOpen = true; await renderBuddy(); document.querySelector('#evForm [name=title]').focus(); return; }
-    if(t.id === 'evCancel'){ evFormOpen = false; return renderBuddy(); }
-    if(t.dataset.join){ t.disabled = true; return attempt(() => S.joinEvent(t.dataset.join), 'You\u2019re in. See you there.').then(ok => { if(!ok) t.disabled = false; }); }
-    if(t.dataset.leave){ if(!armed(t, 'Tap again to withdraw')) return; return attempt(() => S.leaveEvent(t.dataset.leave), 'You\u2019re no longer going.'); }
-    if(t.dataset.parts){ partsOpen = partsOpen === t.dataset.parts ? null : t.dataset.parts; return renderBuddy(); }
-    if(t.dataset.evdel){ if(!armed(t, 'Tap again to cancel the event')) return; return attempt(() => S.deleteEvent(t.dataset.evdel), 'Event cancelled.'); }
     if(t.dataset.cancel){
       if(!armed(t, 'Tap again to cancel')) return;
       return attempt(() => S.cancel(t.dataset.cancel), 'Dyad cancelled.');
     }
   });
   $('view-buddy').addEventListener('submit', async e => {
-    if(e.target.id === 'evForm'){
-      e.preventDefault();
-      const f = Object.fromEntries(new FormData(e.target));
-      const start = f.date && f.time ? new Date(`${f.date}T${f.time}`).toISOString() : '';
-      const btn = e.target.querySelector('[type=submit]'); btn.disabled = true;
-      const ok = await attempt(() => S.createEvent({ ...f, start }), 'Event published.');
-      btn.disabled = false;
-      if(ok){ evFormOpen = false; renderBuddy(); }
-      return;
-    }
     const f = e.target.closest('[data-linkform]'); if(!f) return;
     e.preventDefault();
     const url = new FormData(f).get('url');
@@ -529,6 +502,7 @@
         <a href="#account" ${sub === 'account' ? 'aria-current="page"' : ''}>${me ? 'Profile' : 'Sign in'}</a>
         <a href="#notifications" ${sub === 'notifications' ? 'aria-current="page"' : ''}>Notifications${n ? ` <span class="badge">${n}</span>` : ''}</a>
         <a href="#settings" ${sub === 'settings' ? 'aria-current="page"' : ''}>Settings</a>
+        ${me && me.isAdmin ? `<a href="#events" ${sub === 'events' ? 'aria-current="page"' : ''}>Events</a>` : ''}
       </nav>`;
     const head = `` + subnav;
 
@@ -540,6 +514,20 @@
           <label class="field">New password<input name="password" type="password" required minlength="6" autocomplete="new-password"><span class="note">At least 6 characters</span></label>
           <div class="row"><button class="primary" type="submit">Save new password</button><button type="button" class="link" id="recoveryCancel">Not now</button></div>
         </form>`;
+      return;
+    }
+
+    // ----- Events (admins) -----
+    if(sub === 'events'){
+      if(!me || !me.isAdmin){ el.innerHTML = head + `<h1>Events</h1><p class="empty">Only hosts can create community events.</p>`; return; }
+      const [events, people] = await Promise.all([S.events(), S.people()]);
+      const participants = partsOpen ? await S.eventParticipants(partsOpen) : [];
+      const byId = Object.fromEntries(people.map(p => [p.id, p]));
+      el.innerHTML = head + `
+        <div class="section-head page-head"><h1>Events</h1>${evFormOpen ? '' : `<button class="primary" id="evNew">New event</button>`}</div>
+        ${evFormOpen ? eventForm(me) : ''}
+        ${events.length ? `<ul class="list">${events.map(e => `<li class="event">${eventBody(e, me, { admin:true, byId, participants })}</li>`).join('')}</ul>`
+          : `<p class="empty">No upcoming events. When you publish one, every member gets a notification and can join from there.</p>`}`;
       return;
     }
 
@@ -575,18 +563,29 @@
     // ----- Notifications -----
     if(sub === 'notifications'){
       if(!me){ el.innerHTML = head + `<h1>Notifications</h1>` + signInPrompt('Sign in to see when someone matches your hours, books a dyad with you or cancels.'); return; }
-      const [notes, people] = await Promise.all([S.notifications(), S.people()]);
+      const [notes, people, events] = await Promise.all([S.notifications(), S.people(), S.events()]);
       const byId = Object.fromEntries(people.map(p => [p.id, p]));
+      const evById = Object.fromEntries(events.map(e => [e.id, e]));
       if(seenUnread === null){ seenUnread = new Set(notes.filter(x => !x.read).map(x => x.id)); if(seenUnread.size) S.markAllRead(); }
       el.innerHTML = head + `
         <h1>Notifications</h1>
-        ${notes.length ? `<ul class="list notes">${notes.map(x => `
-          <li class="${seenUnread.has(x.id) ? 'unread' : ''}">
+        ${notes.length ? `<ul class="list notes">${notes.map(x => {
+          const unread = seenUnread.has(x.id) ? 'unread' : '';
+          if(x.kind === 'event'){
+            const ev = evById[x.eventId];
+            return `<li class="event ${unread}"><div class="note-kind tag accent">Community event</div>
+              ${ev ? eventBody(ev, me) : `<div class="meta">This event has already taken place.</div>`}
+              <div class="meta">${esc(dateFmt.format(new Date(x.createdAt)))}</div></li>`;
+          }
+          if(x.kind === 'event_cancelled') return `<li class="${unread}"><div class="note-kind tag">Event cancelled</div>
+            <div><strong>${esc(x.note || 'A community event')}</strong> on ${esc(M.slotLabel(x.slots[0]).split(' · ')[0])} has been cancelled.</div>
+            <div class="meta">${esc(dateFmt.format(new Date(x.createdAt)))}</div></li>`;
+          return `<li class="${unread}">
             <div class="note-kind tag ${x.kind === 'booked' ? 'ok' : ''}">${{ match:'New match', booked:'Dyad booked', cancelled:'Cancelled' }[x.kind] || 'Update'}</div>
             <div>${noteText(x, byId)}</div>
             <div class="row"><span class="meta">${esc(dateFmt.format(new Date(x.createdAt)))}</span>${x.kind !== 'cancelled' ? `<a class="link-inline" href="#buddy">${x.kind === 'match' ? 'See matches' : 'View dyad'}</a>` : ''}</div>
-          </li>`).join('')}</ul>`
-          : `<p class="empty">Nothing yet. When someone matches your hours, books a dyad with you or cancels, it shows up here.</p>`}`;
+          </li>`; }).join('')}</ul>`
+          : `<p class="empty">Nothing yet. When someone matches your hours, books a dyad with you, or a community event is announced, it shows up here.</p>`}`;
       return;
     }
 
@@ -648,6 +647,13 @@
   $('view-account').addEventListener('click', async e => {
     const t = e.target.closest('button'); if(!t) return;
     if(t.dataset.mode){ authMode = t.dataset.mode; resetSentTo = ''; return renderAccount(); }
+    if(t.dataset.cal){ calOpen = calOpen === t.dataset.cal ? null : t.dataset.cal; return renderAccount(); }
+    if(t.id === 'evNew'){ evFormOpen = true; await renderAccount(); document.querySelector('#evForm [name=title]').focus(); return; }
+    if(t.id === 'evCancel'){ evFormOpen = false; return renderAccount(); }
+    if(t.dataset.join){ t.disabled = true; const ok = await attempt(() => S.joinEvent(t.dataset.join), 'You\u2019re in. See you there.'); if(!ok) t.disabled = false; return; }
+    if(t.dataset.leave){ if(!armed(t, 'Tap again to withdraw')) return; return attempt(() => S.leaveEvent(t.dataset.leave), 'You\u2019re no longer going.'); }
+    if(t.dataset.parts){ partsOpen = partsOpen === t.dataset.parts ? null : t.dataset.parts; return renderAccount(); }
+    if(t.dataset.evdel){ if(!armed(t, 'Tap again to cancel the event')) return; return attempt(() => S.deleteEvent(t.dataset.evdel), 'Event cancelled. Everyone who joined has been told.'); }
     if(t.dataset.play){ window.TimerSounds && TimerSounds.play(t.dataset.play); return; }
     if(t.id === 'recoveryCancel'){ S.auth.cancelRecovery(); location.hash = '#home'; return; }
     if(t.id === 'signOut'){ await flushAvailability(); return attempt(() => S.auth.signOut(), 'Signed out.'); }
@@ -687,6 +693,14 @@
     const f = Object.fromEntries(new FormData(e.target));
     if(e.target.id === 'signinForm'){ if(await attempt(() => S.auth.signIn(f.email, f.password), 'Welcome back.')) location.hash = '#buddy'; }
     if(e.target.id === 'signupForm'){ if(await attempt(() => S.auth.signUp(f), 'Account created.')) location.hash = '#buddy'; }
+    if(e.target.id === 'evForm'){
+      const start = f.date && f.time ? new Date(`${f.date}T${f.time}`).toISOString() : '';
+      const btn = e.target.querySelector('[type=submit]'); btn.disabled = true;
+      const ok = await attempt(() => S.createEvent({ ...f, start }), 'Event published. Members have been notified.');
+      btn.disabled = false;
+      if(ok){ evFormOpen = false; renderAccount(); }
+      return;
+    }
     if(e.target.id === 'forgotForm'){ if(await attempt(() => S.auth.requestPasswordReset(f.email))){ resetSentTo = f.email.trim(); renderAccount(); } }
     if(e.target.id === 'newPwForm'){ if(await attempt(() => S.auth.setNewPassword(f.password), 'Password changed. You\u2019re signed in.')) location.hash = '#home'; }
     if(e.target.id === 'changePwForm'){ if(await attempt(() => S.auth.setNewPassword(f.password), 'Password changed.')) e.target.reset(); }
