@@ -302,3 +302,4 @@ button.play{min-height:32px;padding:4px 12px;font-size:13px;flex:none}
 .section>h2+.list,.section-head+.list{border-top:0}
 #view-buddy{gap:48px}
 #view-buddy>h1+.lede{margin-top:-32px}
+.section-intro{margin:0;color:var(--muted);max-width:56ch}

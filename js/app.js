@@ -188,7 +188,6 @@
     const otherTime = (iso, p) => p && p.timezone && p.timezone !== myTz ? `<span class="meta">${esc(M.inZone(iso, p.timezone))} for ${esc(p.name.split(' ')[0])}</span>` : '';
 
     el.innerHTML = head + `
-      <p class="lede">Mark the hours you're free. When someone shares a slot with you, you'll both be told here, and either of you can book it.</p>
 
       ${me.lookingForBuddy === false ? `<div class="callout"><p>You're currently hidden from matching.</p><div class="row"><button id="unpause">Show me to others again</button></div></div>` : ''}
 
@@ -219,6 +218,7 @@
       </section>
 
       <section class="section"><h2>Your availability</h2>
+        <p class="section-intro">Mark the hours you're free. When someone shares a slot with you, you'll both be told here, and either of you can book it. You'll get a notification.</p>
         <div class="week-nav">
           <button id="wkPrev" ${week === 0 ? 'disabled' : ''} aria-label="Previous week">←</button>
           <strong>${esc(dateFmt.format(M.weekDays(week)[0]))} – ${esc(dateFmt.format(M.weekDays(week)[6]))}</strong>
