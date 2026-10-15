@@ -297,9 +297,11 @@ button.play{min-height:32px;padding:4px 12px;font-size:13px;flex:none}
 
 /* ---------- section headings: larger, with the content right underneath ---------- */
 .section>h2,.section-head h2{font-size:21px;font-weight:500;line-height:1.25;color:var(--fg);letter-spacing:-.01em;margin:0}
-.section>h2{margin-bottom:-4px}
-.section-head{margin-bottom:-4px}
+.section>h2{margin-bottom:-9px}
+.section-head{margin-bottom:-9px}
 .section>h2+.list,.section-head+.list{border-top:0}
 #view-buddy{gap:48px}
 #view-buddy>h1+.lede{margin-top:-32px}
 .section-intro{margin:0;color:var(--muted);max-width:56ch}
+.section>h2+.list>li:first-child,.section-head+.list>li:first-child,.section-head+form+.list>li:first-child{padding-top:6px}
+.section-head button.link{padding-block:0}
