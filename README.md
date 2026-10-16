@@ -66,7 +66,7 @@ Only people listed in the Supabase table `app_admins` can create, manage and can
 
 ## Server function
 
-`supabase/functions/notify-booking` emails the buddy when someone books a dyad with them. The email includes the time in their own time zone, the video call link and a calendar file. It needs the secret `RESEND_API_KEY` from resend.com; without it, bookings still work and show up as in-app notifications. Once a domain is verified in Resend, set `EMAIL_FROM` (e.g. `Breakthrough Online <hello@your-domain.org>`).
+`supabase/functions/notify-booking` emails the buddy when someone books a dyad with them. The email includes the time in their own time zone, the video call link and a calendar file. It needs the secret `RESEND_API_KEY` from resend.com; without it, bookings still work and show up as in-app notifications. Once a domain is verified in Resend, set `EMAIL_FROM` (e.g. `Breakthrough Online <lisa@breakthrough-online.com>`).
 
 ## Still to do
 
