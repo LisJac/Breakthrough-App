@@ -20,12 +20,45 @@
   const getSound = () => { try{ const k = localStorage.getItem('breakthrough.sound'); return SOUNDS[k] ? k : 'bell'; }catch(e){ return 'bell'; } };
   const setSound = k => { if(SOUNDS[k]) try{ localStorage.setItem('breakthrough.sound', k); }catch(e){} };
 
-  let ctx = null;
-  function audio(){ if(!ctx){ ctx = new (window.AudioContext||window.webkitAudioContext)(); } if(ctx.state==='suspended' && !paused) ctx.resume(); return ctx; }
-  function strike(key){
-    const sd = SOUNDS[key] || SOUNDS.bell;
-    const c = audio(), t = c.currentTime;
-    const out = c.createGain(); out.gain.value = sd.gain; out.connect(c.destination);
+  // The audio engine. Browsers pause it when the tab goes to the background, the screen
+  // locks or a video call takes over the speakers, and it doesn't restart by itself.
+  // So: keep it busy with an inaudible signal while a dyad runs, wake it up before
+  // every bell and on every tap, and fall back to a plain <audio> element if it won't wake.
+  let ctx = null, keepAlive = null;
+  const clips = {};
+  function audio(){
+    if(!ctx || ctx.state==='closed'){ ctx = new (window.AudioContext||window.webkitAudioContext)(); }
+    if(ctx.state!=='running' && !paused) ctx.resume().catch(()=>{});
+    return ctx;
+  }
+  async function wake(){
+    const c = audio();
+    if(c.state==='running') return true;
+    try{ await Promise.race([c.resume(), new Promise(r=>setTimeout(r,400))]); }catch(e){}
+    if(c.state==='running') return true;
+    // Stuck (e.g. 'interrupted' on iPhone): start a fresh engine.
+    try{ c.close(); }catch(e){}
+    ctx = null; keepAlive = null;
+    const n = audio();
+    try{ await Promise.race([n.resume(), new Promise(r=>setTimeout(r,400))]); }catch(e){}
+    if(running) startKeepAlive();
+    return n.state==='running';
+  }
+  function startKeepAlive(){
+    const c = audio();
+    if(keepAlive && keepAlive.ctx===c) return;
+    try{
+      const src = c.createConstantSource ? c.createConstantSource() : null;
+      if(!src) return;
+      const g = c.createGain(); src.offset.value = 1; g.gain.value = 0.00001;
+      src.connect(g); g.connect(c.destination); src.start();
+      keepAlive = { ctx:c, src };
+    }catch(e){}
+  }
+  function stopKeepAlive(){ try{ keepAlive && keepAlive.src.stop(); }catch(e){} keepAlive = null; }
+
+  function voiceStrike(c, t, dest, sd){
+    const out = c.createGain(); out.gain.value = sd.gain; out.connect(dest);
     sd.partials.forEach(([r, amp, dec]) => {
       (sd.beat ? [-sd.beat, sd.beat] : [0]).forEach(det => {
         const o = c.createOscillator(), g = c.createGain();
@@ -37,13 +70,55 @@
       });
     });
     // mallet strike
-    const n = c.createBuffer(1, c.sampleRate * .04, c.sampleRate), d = n.getChannelData(0);
+    const n = c.createBuffer(1, Math.round(c.sampleRate * .04), c.sampleRate), d = n.getChannelData(0);
     for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
     const s = c.createBufferSource(), lp = c.createBiquadFilter(), sg = c.createGain();
     s.buffer = n; lp.type = 'lowpass'; lp.frequency.value = sd.strike.lp; sg.gain.value = sd.strike.gain;
     s.connect(lp); lp.connect(sg); sg.connect(out); s.start(t);
   }
-  function bowl(){ if($('bellOn').checked) strike(getSound()); }
+
+  // Fallback player: each bell pre-rendered to a WAV and played through an <audio> element,
+  // which was unlocked by the tap on Start.
+  const media = new Audio(); media.preload = 'auto';
+  const wavs = {};
+  const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+  function unlockMedia(){ try{ if(!media.src) media.src = SILENT; const p = media.play(); p && p.then(()=>media.pause()).catch(()=>{}); }catch(e){} }
+  async function wavFor(key){
+    if(wavs[key]) return wavs[key];
+    const sd = SOUNDS[key] || SOUNDS.bell, sr = 44100;
+    const len = Math.max(...sd.partials.map(p=>p[2])) + .3;
+    const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if(!Off) return null;
+    const oc = new Off(1, Math.ceil(sr*len), sr);
+    voiceStrike(oc, 0, oc.destination, sd);
+    const buf = await oc.startRendering();
+    const ch = buf.getChannelData(0), out = new DataView(new ArrayBuffer(44 + ch.length*2));
+    const w = (o, str) => { for(let i=0;i<str.length;i++) out.setUint8(o+i, str.charCodeAt(i)); };
+    w(0,'RIFF'); out.setUint32(4, 36 + ch.length*2, true); w(8,'WAVE'); w(12,'fmt ');
+    out.setUint32(16,16,true); out.setUint16(20,1,true); out.setUint16(22,1,true);
+    out.setUint32(24,sr,true); out.setUint32(28,sr*2,true); out.setUint16(32,2,true); out.setUint16(34,16,true);
+    w(36,'data'); out.setUint32(40, ch.length*2, true);
+    for(let i=0;i<ch.length;i++) out.setInt16(44+i*2, Math.max(-1,Math.min(1,ch[i]))*32767, true);
+    return (wavs[key] = URL.createObjectURL(new Blob([out], {type:'audio/wav'})));
+  }
+  async function playMedia(key){
+    const url = await wavFor(key); if(!url) return;
+    try{ media.src = url; media.currentTime = 0; await media.play(); }catch(e){}
+  }
+
+  function strike(key){
+    const sd = SOUNDS[key] || SOUNDS.bell;
+    const c = audio();
+    voiceStrike(c, c.currentTime, c.destination, sd);
+  }
+  // During a dyad: make sure the engine is awake first; if it won't wake, use the fallback.
+  async function ring(key){
+    if(await wake()) strike(key); else playMedia(key);
+  }
+  // Any tap or returning to the tab wakes the engine (a tap is what browsers require).
+  ['pointerdown','touchstart','keydown'].forEach(ev => document.addEventListener(ev, () => { if(ctx && ctx.state!=='running' && !paused) ctx.resume().catch(()=>{}); }, { passive:true }));
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState==='visible' && running && !paused) wake(); });
+  function bowl(){ if($('bellOn').checked) ring(getSound()); }
   const bellHold = last => SOUNDS[getSound()].hold + (last ? 1500 : 0);
   // Sound picker on the Timer tab (also in Settings; both use the same saved choice).
   const soundSel = $('soundSel');
@@ -62,7 +137,6 @@
 
   // ---------- voice: recorded instructions ----------
   const CLIP_SRC = window.DYAD_CLIPS || {};
-  const clips = {};
   async function loadClips(){
     const c = audio();
     await Promise.all(Object.keys(CLIP_SRC).map(async k => {
@@ -79,6 +153,7 @@
     await loadClips(); if(tk!==token) return;
     const b = clips[clip];
     if(!b) return wait(Math.max(2500,text.length*70), tk);
+    await wake(); if(tk!==token) return;
     const c = audio(), s = c.createBufferSource(), g = c.createGain();
     g.gain.value = 1; s.buffer = b; s.connect(g); g.connect(c.destination); s.start();
     voiceSrc = s;
@@ -198,19 +273,19 @@
   function unlock(){ try{ wakeLock?.release(); }catch(e){} wakeLock=null; }
 
   function start(){
-    audio(); loadClips(); plan = buildPlan(); renderStatic();
-    running=true; paused=false; token++; setButtons(); lock(); run(token);
+    audio(); unlockMedia(); loadClips(); wavFor(getSound()); plan = buildPlan(); renderStatic();
+    running=true; paused=false; token++; setButtons(); lock(); startKeepAlive(); run(token);
   }
   function stop(msg='Stopped. Press Start to begin again.'){
     token++; running=false; paused=false;
-    stopVoice(); if(ctx && ctx.state==='suspended') ctx.resume();
+    stopVoice(); stopKeepAlive(); if(ctx && ctx.state!=='running') ctx.resume().catch(()=>{});
     unlock(); setButtons(); renderStatic();
     $('phase').textContent='Ready'; $('clock').classList.add('idle');
     $('say').textContent=msg; $('say').classList.add('quiet');
     document.querySelectorAll('#seq li').forEach(li=>li.classList.remove('done','now'));
   }
   function finish(){
-    running=false; unlock(); setButtons();
+    running=false; stopKeepAlive(); unlock(); setButtons();
     document.querySelectorAll('#seq li').forEach(li=>{li.classList.add('done');li.classList.remove('now');});
     document.querySelectorAll('#strip .seg').forEach(s=>s.classList.add('done'));
     $('phase').textContent='Complete'; $('clock').textContent='0:00'; $('clock').classList.add('idle');
@@ -221,14 +296,15 @@
   $('startBtn').onclick = () => {
     if(!running) return start();
     paused = !paused;
-    if(ctx){ paused ? ctx.suspend() : ctx.resume(); }
+    if(ctx){ paused ? ctx.suspend().catch(()=>{}) : ctx.resume().catch(()=>{}); }
+    if(!paused) unlockMedia();
     if(paused) $('phase').textContent = 'Paused';
     else if(plan[cur]) $('phase').textContent = plan[cur].type==='timer'?plan[cur].label:plan[cur].type==='bell'?'Singing bowl':'Instruction';
     setButtons();
   };
   $('stopBtn').onclick = () => stop();
   $('restartBtn').onclick = () => { stop(''); start(); };
-  $('testBtn').onclick = () => { audio(); bowl(); setTimeout(()=>{ if(!running) speak('middle','Thank you partner. Change over.', token); }, 1500); };
+  $('testBtn').onclick = () => { audio(); unlockMedia(); bowl(); setTimeout(()=>{ if(!running) speak('middle','Thank you partner. Change over.', token); }, 1500); };
   ['turns','len'].forEach(id=>$(id).addEventListener('input',()=>{ plan=buildPlan(); renderStatic(); }));
   document.addEventListener('visibilitychange',()=>{ if(running && document.visibilityState==='visible' && !wakeLock) lock(); });
   document.addEventListener('keydown',e=>{ if(e.code==='Space' && e.target===document.body && timerVisible() && !$('s3').hidden){ e.preventDefault(); $('startBtn').click(); }});
@@ -236,10 +312,10 @@
   $('len').addEventListener('blur',()=>{ const s=parseLen($('len').value); if(s!==null) $('len').value=fmt(s); });
 
   function jumpTo(i){
-    audio(); loadClips(); stopVoice();
+    audio(); unlockMedia(); loadClips(); stopVoice();
     if(!running){ plan = buildPlan(); renderStatic(); lock(); }
-    token++; running=true; paused=false;
-    if(ctx && ctx.state==='suspended') ctx.resume();
+    token++; running=true; paused=false; startKeepAlive();
+    if(ctx && ctx.state!=='running') ctx.resume().catch(()=>{});
     document.querySelectorAll('#strip .seg i').forEach(x=>x.style.width='');
     const s=plan[i];
     if(s && s.type!=='timer'){ const nt=plan.slice(i).find(x=>x.type==='timer'); if(nt){ $('clock').textContent=fmt(nt.dur); $('remainLabel').textContent=fmt(totalTimer(i))+' left'; } }
