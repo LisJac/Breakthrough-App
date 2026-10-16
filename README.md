@@ -6,7 +6,7 @@ A small web app for practitioners of the Breakthrough Intensive:
    - Mark the hours you're free. When someone else is free at the same time, you both get a notification, and either of you can book the slot.
    - Booked dyads come with a video call link and "Save in calendar".
    - **Community events** (e.g. hosted by Frances) arrive as notifications, and members join from there. Admins create and manage events under Account → Events.
-2. **Timer:** the dyad timer with the singing bowl and the recorded instructions.
+2. **Timer:** the dyad timer with the singing bowl and the recorded instructions. For online dyads, "Invite your partner" in step 1 copies a link; once the partner opens it, Start, Pause, Stop and jumps happen on both devices and each hears the bell on their own (js/sync.js, Supabase Realtime, nothing stored). Booked dyads have "Open shared timer", which puts both people in the same timer without a link.
 3. **Inspiration:** a shared board of books, films, podcasts, talks and practices, with optional images. You can view it as a list or as tiles.
 4. **Account**, with three sections:
    - **Profile:** photo, name, question, time zone and matching visibility.

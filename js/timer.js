@@ -116,7 +116,7 @@
     if(await wake()) strike(key); else playMedia(key);
   }
   // Any tap or returning to the tab wakes the engine (a tap is what browsers require).
-  ['pointerdown','touchstart','keydown'].forEach(ev => document.addEventListener(ev, () => { if(ctx && ctx.state!=='running' && !paused) ctx.resume().catch(()=>{}); }, { passive:true }));
+  ['pointerdown','touchstart','keydown'].forEach(ev => document.addEventListener(ev, () => { if(together && !ctx) { audio(); unlockMedia(); } if(ctx && ctx.state!=='running' && !paused) ctx.resume().catch(()=>{}); }, { passive:true }));
   document.addEventListener('visibilitychange', () => { if(document.visibilityState==='visible' && running && !paused) wake(); });
   function bowl(){ if($('bellOn').checked) ring(getSound()); }
   const bellHold = last => SOUNDS[getSound()].hold + (last ? 1500 : 0);
@@ -366,13 +366,15 @@
   document.addEventListener('keydown',e=>{ if(e.key==='Enter' && timerVisible() && !$('s1').hidden && e.target===document.body) go(2); });
 
   // ---------- together: one timer for both partners ----------
-  // Whoever presses Start, Pause, Stop or jumps, it happens on both devices.
-  // Each person hears the bell and the voice on their own device, in their own chosen sound.
+  // Step 1: "Invite your partner" copies a link. The partner opens it and is in.
+  // From then on Start, Pause, Stop, Restart and jumps happen on both devices;
+  // each person hears the bell and voice on their own device.
   const T = window.TimerSync;
-  const roomFromHash = () => { const m = location.hash.match(/[?&]room=([A-Za-z0-9-]+)/); return m ? T.clean(m[1]) : ''; };
-  const linkFor = code => location.origin + location.pathname + '#timer?room=' + code;
-  const myName = () => { try{ return (window.Store?.auth.current()?.name || '').split(' ')[0] || 'Your partner'; }catch(e){ return 'Your partner'; } };
-  let invite = '', joinOpen = false, copied = false;
+  const hashParam = k => { const m = location.hash.match(new RegExp('[?&]' + k + '=([^&]+)')); return m ? decodeURIComponent(m[1]) : ''; };
+  const myName = () => { try{ return (window.Store?.auth.current()?.name || '').split(' ')[0]; }catch(e){ return ''; } };
+  const linkFor = code => location.origin + location.pathname + '#timer?room=' + code + '&invite=1' + (myName() ? '&from=' + encodeURIComponent(myName()) : '');
+  const escT = v => String(v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  let invite = null, copied = false, iInvited = false;
 
   function send(msg){ if(together) try{ together.conn.send(msg); }catch(e){} }
 
@@ -380,18 +382,20 @@
     if(!m || !m.k) return;
     if(m.k==='settings' && !running){ $('turns').value = m.turns; $('len').value = m.len; plan = buildPlan(); renderStatic(); }
     if(m.k==='start'){
-      $('turns').value = m.turns; $('len').value = typeof m.turnSec==='number' ? fmt(m.turnSec) : $('len').value;
+      $('turns').value = m.turns; if(typeof m.turnSec==='number') $('len').value = fmt(m.turnSec);
       if(running) stop('');
       plan = buildPlan(); renderStatic();
+      if($('s3').hidden) go(3);
       startSoon(Math.max(0, (m.delay || 0) - 80));   // ~80 ms for the message to arrive
     }
     if(m.k==='pause') setPaused(true, m.cur===cur ? m.left : null);
     if(m.k==='resume') setPaused(false);
     if(m.k==='stop'){ clearTimeout(pending); pending=null; $('startBtn').disabled=false; if(running) stop(); }
-    if(m.k==='jump') jumpTo(m.i);
+    if(m.k==='jump'){ if($('s3').hidden) go(3); jumpTo(m.i); }
     if(m.k==='state' && !running){
       // Joined while the partner's timer was already running: catch up.
       $('turns').value = m.turns; $('len').value = fmt(m.turnSec); plan = buildPlan(); renderStatic();
+      if($('s3').hidden) go(3);
       jumpTo(m.cur, m.left);
       if(m.paused) setPaused(true, m.left);
     }
@@ -399,16 +403,15 @@
 
   function join(code){
     leave(true);
-    audio(); unlockMedia();            // this tap is what lets the bell ring later without one
+    audio(); unlockMedia();            // needs a tap: lets the bell ring later without one
     together = { code, peers: [], conn: null };
     together.conn = T.join(code, {
-      name: myName(),
+      name: myName() || 'Your partner',
       onMessage: receive,
       onPeers: list => {
-        const before = together ? together.peers.length : 0;
         if(!together) return;
+        const before = together.peers.length;
         together.peers = list;
-        // Someone new arrived while this timer runs: tell them where we are.
         if(list.length > before && running){
           const s = plan[cur];
           send({ k:'state', ...settings(), cur, left: s && s.type==='timer' ? timerLeft : null, paused });
@@ -417,77 +420,76 @@
       }
     });
     startKeepAlive();
-    invite = ''; joinOpen = false;
-    if(roomFromHash() !== code) history.replaceState(null, '', '#timer?room=' + code);
+    invite = null;
     renderTogether();
   }
   function leave(quiet){
     if(!together) return;
     try{ together.conn.leave(); }catch(e){}
-    together = null;
+    together = null; iInvited = false;
     if(!running) stopKeepAlive();
-    if(!quiet){ history.replaceState(null, '', '#timer'); renderTogether(); }
+    if(!quiet){ if(/room=/.test(location.hash)) history.replaceState(null, '', '#timer'); renderTogether(); }
+  }
+  async function copyLink(){
+    const url = linkFor(together.code);
+    let ok = true;
+    try{ await navigator.clipboard.writeText(url); }catch(err){ ok = false; }
+    if(!ok){ try{ if(navigator.share){ await navigator.share({ title:'Shared dyad timer', url }); ok = true; } }catch(e){} }
+    if(!ok) window.prompt('Copy this link and send it to your partner:', url);
+    copied = true; renderTogether(); setTimeout(()=>{ copied=false; renderTogether(); }, 2500);
   }
 
   const names = list => { const n = [...new Set(list.map(p => p.name || 'Your partner'))]; return n.length < 3 ? n.join(' and ') : n.slice(0, -1).join(', ') + ' and ' + n.at(-1); };
-  const escT = v => String(v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 
   function renderTogether(){
-    const el = $('together'); if(!el) return;
-    if(!T || !T.available()){ el.hidden = true; return; }
-    el.hidden = false;
-    if(together){
-      const p = together.peers;
-      el.className = 'together on';
-      el.innerHTML = `
-        <div class="tg-head"><span class="tg-dot ${p.length ? 'live' : ''}" aria-hidden="true"></span>
-          <span>${p.length ? `<strong>${escT(names(p))}</strong> ${p.length === 1 ? 'is' : 'are'} connected. Start, pause and stop happen for both of you.` : 'Waiting for your partner to open the link …'}</span></div>
-        <div class="tg-row"><span class="tg-code">Code <b>${escT(together.code)}</b></span>
-          <button class="play" id="tgCopy">${copied ? 'Link copied' : 'Copy link'}</button>
-          <span style="flex:1"></span><button class="link" id="tgLeave">Leave</button></div>`;
-      return;
-    }
-    el.className = 'together';
+    const one = $('together1'), three = $('together3'); if(!one || !three) return;
+    if(!T || !T.available()){ one.hidden = three.hidden = true; return; }
+    one.hidden = false;
     if(invite){
-      el.innerHTML = `<div class="tg-head"><span class="tg-dot" aria-hidden="true"></span><span>Join the shared timer to start, pause and stop together with your partner.</span></div>
-        <div class="tg-row"><button class="primary" id="tgAccept">Join shared timer</button><button class="link" id="tgDecline">Not now</button></div>`;
-      return;
+      // Arrived from a partner's link and hasn't tapped yet (browsers need a tap before sound).
+      const html = `<div class="tg-invite"><p>${invite.from ? `<strong>${escT(invite.from)}</strong> invited you` : 'You were invited'} to a shared timer.</p>
+        <button class="primary" data-tg="accept">Join</button></div>`;
+      one.innerHTML = three.innerHTML = html; three.hidden = false; one.className = three.className = 'together on'; return;
     }
-    el.innerHTML = `
-      <div class="tg-row"><button class="link" id="tgCreate">Run the timer together</button><span class="note">Your partner hears the bell on their own device.</span></div>
-      ${joinOpen
-        ? `<form class="tg-row" id="tgJoinForm"><label class="field tg-field"><input name="code" autocomplete="off" autocapitalize="characters" placeholder="Code" aria-label="Code from your partner" maxlength="12"></label><button class="primary" type="submit">Join</button><button type="button" class="link" id="tgJoinCancel">Cancel</button></form>`
-        : `<div class="tg-row"><button class="link muted" id="tgJoinOpen">Join with a code</button></div>`}`;
+    if(!together){
+      one.className = 'together';
+      one.innerHTML = `<button data-tg="invite">Invite your partner</button>
+        <p class="note">For online dyads. You both hear the bell, and Start, Pause and Stop happen for both of you.</p>`;
+      three.hidden = true; three.innerHTML = ''; return;
+    }
+    const p = together.peers;
+    const status = p.length
+      ? `<span class="tg-dot live" aria-hidden="true"></span><span><strong>${escT(names(p))}</strong> ${p.length === 1 ? 'is' : 'are'} connected.</span>`
+      : `<span class="tg-dot" aria-hidden="true"></span><span>${copied ? 'Link copied. Paste it into the chat of your video call.' : 'Waiting for your partner …'}</span>`;
+    const actions = `${!p.length ? `<button class="link" data-tg="copy">${copied ? 'Copied' : 'Copy link again'}</button>` : ''}<button class="link muted" data-tg="leave">${p.length ? 'Disconnect' : 'Cancel'}</button>`;
+    one.className = three.className = 'together on';
+    one.innerHTML = three.innerHTML = `<div class="tg-head">${status}</div><div class="tg-row">${actions}</div>`;
+    three.hidden = false;
   }
 
-  $('together') && $('together').addEventListener('click', async e => {
-    const id = e.target.closest('button')?.id;
-    if(id==='tgCreate') join(T.newCode());
-    if(id==='tgAccept') join(invite);
-    if(id==='tgDecline'){ invite=''; history.replaceState(null, '', '#timer'); renderTogether(); }
-    if(id==='tgLeave') leave();
-    if(id==='tgJoinOpen'){ joinOpen=true; renderTogether(); $('tgJoinForm')?.code.focus(); }
-    if(id==='tgJoinCancel'){ joinOpen=false; renderTogether(); }
-    if(id==='tgCopy'){
-      const url = linkFor(together.code);
-      try{ await navigator.clipboard.writeText(url); }catch(err){ window.prompt('Copy this link:', url); }
-      copied = true; renderTogether(); setTimeout(()=>{ copied=false; renderTogether(); }, 2000);
-    }
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-tg]'); if(!b) return;
+    const a = b.dataset.tg;
+    if(a==='invite'){ join(T.newCode()); iInvited = true; await copyLink(); }
+    if(a==='accept'){ const code = invite.code; join(code); }
+    if(a==='copy') copyLink();
+    if(a==='leave') leave();
   });
-  $('together') && $('together').addEventListener('submit', e => {
-    if(e.target.id!=='tgJoinForm') return; e.preventDefault();
-    const code = T.clean(e.target.code.value); if(code.length >= 4) join(code);
-  });
-  // Opened from an invite link (#timer?room=CODE): go straight to the timer and offer to join.
+
+  // Opened a link with #timer?room=CODE (from a partner, or "Open shared timer" on a booked dyad).
   function checkInvite(){
-    const code = roomFromHash();
+    const code = T ? T.clean(hashParam('room')) : '';
     if(!code || (together && together.code === code)) return;
     if(location.hash.replace(/^#\/?/, '').split(/[?\/&=]/)[0] !== 'timer') return;
-    invite = code; go(3); renderTogether();
+    const fromPartner = !!hashParam('invite');
+    if(navigator.userActivation?.hasBeenActive){ join(code); }      // already tapped in the app: join right away
+    else invite = { code, from: hashParam('from') };
+    // A partner's link skips the first two steps; a booked dyad starts at step 1 together.
+    go(fromPartner ? 3 : 1);
+    renderTogether();
   }
   window.addEventListener('hashchange', checkInvite);
   checkInvite();
   renderTogether();
-
   renderStatic();
 })();
