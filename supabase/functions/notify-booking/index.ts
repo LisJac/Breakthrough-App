@@ -3,8 +3,8 @@
 // Called by the app right after a booking. Only the person who booked can trigger it,
 // and each booking is emailed at most once.
 //
-// Needs the secret RESEND_API_KEY (resend.com). Optional: EMAIL_FROM, e.g.
-// "Breakthrough Online <hello@your-domain.org>" once a domain is verified in Resend.
+// Needs the secret RESEND_API_KEY (resend.com). Sends from hello@breakthrough-online.com
+// (domain verified in Resend); EMAIL_FROM overrides the sender if set.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const cors = {
@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: Deno.env.get("EMAIL_FROM") || "Breakthrough Online <onboarding@resend.dev>",
+        from: Deno.env.get("EMAIL_FROM") || "Breakthrough Online <hello@breakthrough-online.com>",
         to: [to], subject, html, text,
         attachments: [{ filename: "dyad.ics", content: btoa(unescape(encodeURIComponent(ics))) }],
       }),
