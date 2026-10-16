@@ -41,7 +41,7 @@
     ctx = null; keepAlive = null;
     const n = audio();
     try{ await Promise.race([n.resume(), new Promise(r=>setTimeout(r,400))]); }catch(e){}
-    if(running) startKeepAlive();
+    if(running || together) startKeepAlive();
     return n.state==='running';
   }
   function startKeepAlive(){
@@ -55,7 +55,7 @@
       keepAlive = { ctx:c, src };
     }catch(e){}
   }
-  function stopKeepAlive(){ try{ keepAlive && keepAlive.src.stop(); }catch(e){} keepAlive = null; }
+  function stopKeepAlive(){ if(together) return; try{ keepAlive && keepAlive.src.stop(); }catch(e){} keepAlive = null; }
 
   function voiceStrike(c, t, dest, sd){
     const out = c.createGain(); out.gain.value = sd.gain; out.connect(dest);
@@ -140,23 +140,25 @@
   async function loadClips(){
     const c = audio();
     await Promise.all(Object.keys(CLIP_SRC).map(async k => {
-      if(clips[k]) return;
+      if(k in clips) return;
       try{
         const bin = atob(CLIP_SRC[k]), buf = new Uint8Array(bin.length);
         for(let i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i);
-        clips[k] = await new Promise((res,rej)=>c.decodeAudioData(buf.buffer,res,rej));
+        clips[k] = await c.decodeAudioData(buf.buffer);
       }catch(e){ clips[k]=null; }
     }));
   }
   async function speak(clip, text, tk){
-    if(!$('voiceOn').checked) return wait(Math.max(2500,text.length*70), tk);
+    // The step lasts as long as the recording, voice on or off, so shared timers stay in step.
     await loadClips(); if(tk!==token) return;
     const b = clips[clip];
     if(!b) return wait(Math.max(2500,text.length*70), tk);
-    await wake(); if(tk!==token) return;
-    const c = audio(), s = c.createBufferSource(), g = c.createGain();
-    g.gain.value = 1; s.buffer = b; s.connect(g); g.connect(c.destination); s.start();
-    voiceSrc = s;
+    if($('voiceOn').checked){
+      await wake(); if(tk!==token) return;
+      const c = audio(), s = c.createBufferSource(), g = c.createGain();
+      g.gain.value = 1; s.buffer = b; s.connect(g); g.connect(c.destination); s.start();
+      voiceSrc = s;
+    }
     await wait(b.duration*1000 + 400, tk);
     voiceSrc = null;
   }
@@ -207,7 +209,7 @@
   const totalTimer = (from=0) => plan.slice(from).filter(s=>s.type==='timer').reduce((a,s)=>a+s.dur,0);
 
   // ---------- runner ----------
-  let running=false, paused=false, token=0, cur=-1, timerLeft=0, wakeLock=null;
+  let running=false, paused=false, token=0, cur=-1, timerLeft=0, wakeLock=null, together=null;
   function wait(ms, tk){
     return new Promise(res=>{
       let left = ms, last = performance.now();
@@ -215,7 +217,7 @@
         if(tk!==token){ clearInterval(id); return res(false); }
         const now=performance.now(); if(!paused) left -= now-last; last=now;
         if(left<=0){ clearInterval(id); res(true); }
-      },50);
+      },25);
     });
   }
   async function untilUnpaused(tk){ while(paused && tk===token) await new Promise(r=>setTimeout(r,100)); return tk===token; }
@@ -229,7 +231,7 @@
     $('turnLabel').textContent = s.turn<turns ? `Turn ${s.turn+1} of ${turns}` : 'Closing';
   }
 
-  async function run(tk, from=0){
+  async function run(tk, from=0, firstLeft){
     for(let i=from;i<plan.length;i++){
       if(!(await untilUnpaused(tk))) return;
       const s = plan[i]; mark(i);
@@ -245,7 +247,7 @@
         $('phase').textContent = s.label;
         $('clock').classList.remove('idle');
         const seg = document.querySelector(`#strip .seg[data-i="${s.turn}"] i`);
-        timerLeft = s.dur; let last = performance.now();
+        timerLeft = (i===from && firstLeft!=null) ? Math.min(s.dur, firstLeft) : s.dur; let last = performance.now();
         const restAfter = totalTimer(i+1);
         await new Promise(res=>{
           const tick=()=>{
@@ -255,7 +257,7 @@
             $('remainLabel').textContent = fmt(timerLeft+restAfter)+' left';
             if(seg && !paused) seg.style.width = (100*(1-timerLeft/s.dur))+'%';
             if(timerLeft<=0) return res();
-            setTimeout(tick, 200);
+            setTimeout(tick, Math.max(15, Math.min(200, timerLeft*1000)));
           }; tick();
         });
         if(tk!==token) return;
@@ -293,25 +295,48 @@
     $('say').textContent='The dyad is complete.'; $('say').classList.add('quiet');
   }
 
-  $('startBtn').onclick = () => {
-    if(!running) return start();
-    paused = !paused;
+  function setPaused(p, left){
+    if(!running || paused===p) return;
+    paused = p;
+    if(p && left!=null && plan[cur] && plan[cur].type==='timer') timerLeft = left;   // freeze on the same second as the partner
     if(ctx){ paused ? ctx.suspend().catch(()=>{}) : ctx.resume().catch(()=>{}); }
     if(!paused) unlockMedia();
     if(paused) $('phase').textContent = 'Paused';
     else if(plan[cur]) $('phase').textContent = plan[cur].type==='timer'?plan[cur].label:plan[cur].type==='bell'?'Singing bowl':'Instruction';
     setButtons();
+  }
+  // Start a moment later when a partner is connected, so both bells ring together.
+  const LEAD = 1200;
+  let pending = null;
+  function startSoon(ms){
+    clearTimeout(pending); $('phase').textContent = 'Starting…'; $('startBtn').disabled = true;
+    pending = setTimeout(()=>{ pending=null; $('startBtn').disabled = false; start(); }, ms);
+  }
+  const shared = () => together && together.peers.length > 0;
+
+  $('startBtn').onclick = () => {
+    audio(); unlockMedia();
+    if(!running){
+      if(shared()){ send({ k:'start', ...settings(), delay:LEAD }); return startSoon(LEAD); }
+      return start();
+    }
+    const p = !paused;
+    send({ k: p ? 'pause' : 'resume', cur, left: timerLeft });
+    setPaused(p, timerLeft);
   };
-  $('stopBtn').onclick = () => stop();
-  $('restartBtn').onclick = () => { stop(''); start(); };
+  $('stopBtn').onclick = () => { clearTimeout(pending); send({ k:'stop' }); stop(); };
+  $('restartBtn').onclick = () => {
+    stop('');
+    if(shared()){ send({ k:'start', ...settings(), delay:LEAD }); startSoon(LEAD); } else start();
+  };
   $('testBtn').onclick = () => { audio(); unlockMedia(); bowl(); setTimeout(()=>{ if(!running) speak('middle','Thank you partner. Change over.', token); }, 1500); };
-  ['turns','len'].forEach(id=>$(id).addEventListener('input',()=>{ plan=buildPlan(); renderStatic(); }));
+  ['turns','len'].forEach(id=>$(id).addEventListener('input',()=>{ plan=buildPlan(); renderStatic(); if(!running) send({ k:'settings', turns:$('turns').value, len:$('len').value }); }));
   document.addEventListener('visibilitychange',()=>{ if(running && document.visibilityState==='visible' && !wakeLock) lock(); });
   document.addEventListener('keydown',e=>{ if(e.code==='Space' && e.target===document.body && timerVisible() && !$('s3').hidden){ e.preventDefault(); $('startBtn').click(); }});
 
   $('len').addEventListener('blur',()=>{ const s=parseLen($('len').value); if(s!==null) $('len').value=fmt(s); });
 
-  function jumpTo(i){
+  function jumpTo(i, left){
     audio(); unlockMedia(); loadClips(); stopVoice();
     if(!running){ plan = buildPlan(); renderStatic(); lock(); }
     token++; running=true; paused=false; startKeepAlive();
@@ -320,11 +345,12 @@
     const s=plan[i];
     if(s && s.type!=='timer'){ const nt=plan.slice(i).find(x=>x.type==='timer'); if(nt){ $('clock').textContent=fmt(nt.dur); $('remainLabel').textContent=fmt(totalTimer(i))+' left'; } }
     $('clock').classList.remove('idle');
-    setButtons(); run(token, i);
+    setButtons(); run(token, i, left);
   }
-  $('seq').addEventListener('click',e=>{ const li=e.target.closest('li[data-i]'); if(li) jumpTo(+li.dataset.i); });
-  $('seq').addEventListener('keydown',e=>{ const li=e.target.closest('li[data-i]'); if(li && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); jumpTo(+li.dataset.i); }});
-  $('strip').addEventListener('click',e=>{ const seg=e.target.closest('.seg'); if(!seg) return; const t=+seg.dataset.i; const idx=plan.findIndex(s=>s.turn===t); if(idx>=0) jumpTo(idx); });
+  const userJump = i => { send({ k:'jump', i }); jumpTo(i); };
+  $('seq').addEventListener('click',e=>{ const li=e.target.closest('li[data-i]'); if(li) userJump(+li.dataset.i); });
+  $('seq').addEventListener('keydown',e=>{ const li=e.target.closest('li[data-i]'); if(li && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); userJump(+li.dataset.i); }});
+  $('strip').addEventListener('click',e=>{ const seg=e.target.closest('.seg'); if(!seg) return; const t=+seg.dataset.i; const idx=plan.findIndex(s=>s.turn===t); if(idx>=0) userJump(idx); });
 
   // ---------- steps ----------
   function go(n){
@@ -338,6 +364,130 @@
   // Step 1: back to wherever the timer was opened from.
   $('back0').onclick=()=>{ if(history.length > 1) history.back(); else location.hash = '#home'; };
   document.addEventListener('keydown',e=>{ if(e.key==='Enter' && timerVisible() && !$('s1').hidden && e.target===document.body) go(2); });
+
+  // ---------- together: one timer for both partners ----------
+  // Whoever presses Start, Pause, Stop or jumps, it happens on both devices.
+  // Each person hears the bell and the voice on their own device, in their own chosen sound.
+  const T = window.TimerSync;
+  const roomFromHash = () => { const m = location.hash.match(/[?&]room=([A-Za-z0-9-]+)/); return m ? T.clean(m[1]) : ''; };
+  const linkFor = code => location.origin + location.pathname + '#timer?room=' + code;
+  const myName = () => { try{ return (window.Store?.auth.current()?.name || '').split(' ')[0] || 'Your partner'; }catch(e){ return 'Your partner'; } };
+  let invite = '', joinOpen = false, copied = false;
+
+  function send(msg){ if(together) try{ together.conn.send(msg); }catch(e){} }
+
+  function receive(m){
+    if(!m || !m.k) return;
+    if(m.k==='settings' && !running){ $('turns').value = m.turns; $('len').value = m.len; plan = buildPlan(); renderStatic(); }
+    if(m.k==='start'){
+      $('turns').value = m.turns; $('len').value = typeof m.turnSec==='number' ? fmt(m.turnSec) : $('len').value;
+      if(running) stop('');
+      plan = buildPlan(); renderStatic();
+      startSoon(Math.max(0, (m.delay || 0) - 80));   // ~80 ms for the message to arrive
+    }
+    if(m.k==='pause') setPaused(true, m.cur===cur ? m.left : null);
+    if(m.k==='resume') setPaused(false);
+    if(m.k==='stop'){ clearTimeout(pending); pending=null; $('startBtn').disabled=false; if(running) stop(); }
+    if(m.k==='jump') jumpTo(m.i);
+    if(m.k==='state' && !running){
+      // Joined while the partner's timer was already running: catch up.
+      $('turns').value = m.turns; $('len').value = fmt(m.turnSec); plan = buildPlan(); renderStatic();
+      jumpTo(m.cur, m.left);
+      if(m.paused) setPaused(true, m.left);
+    }
+  }
+
+  function join(code){
+    leave(true);
+    audio(); unlockMedia();            // this tap is what lets the bell ring later without one
+    together = { code, peers: [], conn: null };
+    together.conn = T.join(code, {
+      name: myName(),
+      onMessage: receive,
+      onPeers: list => {
+        const before = together ? together.peers.length : 0;
+        if(!together) return;
+        together.peers = list;
+        // Someone new arrived while this timer runs: tell them where we are.
+        if(list.length > before && running){
+          const s = plan[cur];
+          send({ k:'state', ...settings(), cur, left: s && s.type==='timer' ? timerLeft : null, paused });
+        }
+        renderTogether();
+      }
+    });
+    startKeepAlive();
+    invite = ''; joinOpen = false;
+    if(roomFromHash() !== code) history.replaceState(null, '', '#timer?room=' + code);
+    renderTogether();
+  }
+  function leave(quiet){
+    if(!together) return;
+    try{ together.conn.leave(); }catch(e){}
+    together = null;
+    if(!running) stopKeepAlive();
+    if(!quiet){ history.replaceState(null, '', '#timer'); renderTogether(); }
+  }
+
+  const names = list => { const n = [...new Set(list.map(p => p.name || 'Your partner'))]; return n.length < 3 ? n.join(' and ') : n.slice(0, -1).join(', ') + ' and ' + n.at(-1); };
+  const escT = v => String(v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+  function renderTogether(){
+    const el = $('together'); if(!el) return;
+    if(!T || !T.available()){ el.hidden = true; return; }
+    el.hidden = false;
+    if(together){
+      const p = together.peers;
+      el.className = 'together on';
+      el.innerHTML = `
+        <div class="tg-head"><span class="tg-dot ${p.length ? 'live' : ''}" aria-hidden="true"></span>
+          <span>${p.length ? `<strong>${escT(names(p))}</strong> ${p.length === 1 ? 'is' : 'are'} connected. Start, pause and stop happen for both of you.` : 'Waiting for your partner to open the link …'}</span></div>
+        <div class="tg-row"><span class="tg-code">Code <b>${escT(together.code)}</b></span>
+          <button class="play" id="tgCopy">${copied ? 'Link copied' : 'Copy link'}</button>
+          <span style="flex:1"></span><button class="link" id="tgLeave">Leave</button></div>`;
+      return;
+    }
+    el.className = 'together';
+    if(invite){
+      el.innerHTML = `<div class="tg-head"><span class="tg-dot" aria-hidden="true"></span><span>Join the shared timer to start, pause and stop together with your partner.</span></div>
+        <div class="tg-row"><button class="primary" id="tgAccept">Join shared timer</button><button class="link" id="tgDecline">Not now</button></div>`;
+      return;
+    }
+    el.innerHTML = `
+      <div class="tg-row"><button class="link" id="tgCreate">Run the timer together</button><span class="note">Your partner hears the bell on their own device.</span></div>
+      ${joinOpen
+        ? `<form class="tg-row" id="tgJoinForm"><label class="field tg-field"><input name="code" autocomplete="off" autocapitalize="characters" placeholder="Code" aria-label="Code from your partner" maxlength="12"></label><button class="primary" type="submit">Join</button><button type="button" class="link" id="tgJoinCancel">Cancel</button></form>`
+        : `<div class="tg-row"><button class="link muted" id="tgJoinOpen">Join with a code</button></div>`}`;
+  }
+
+  $('together') && $('together').addEventListener('click', async e => {
+    const id = e.target.closest('button')?.id;
+    if(id==='tgCreate') join(T.newCode());
+    if(id==='tgAccept') join(invite);
+    if(id==='tgDecline'){ invite=''; history.replaceState(null, '', '#timer'); renderTogether(); }
+    if(id==='tgLeave') leave();
+    if(id==='tgJoinOpen'){ joinOpen=true; renderTogether(); $('tgJoinForm')?.code.focus(); }
+    if(id==='tgJoinCancel'){ joinOpen=false; renderTogether(); }
+    if(id==='tgCopy'){
+      const url = linkFor(together.code);
+      try{ await navigator.clipboard.writeText(url); }catch(err){ window.prompt('Copy this link:', url); }
+      copied = true; renderTogether(); setTimeout(()=>{ copied=false; renderTogether(); }, 2000);
+    }
+  });
+  $('together') && $('together').addEventListener('submit', e => {
+    if(e.target.id!=='tgJoinForm') return; e.preventDefault();
+    const code = T.clean(e.target.code.value); if(code.length >= 4) join(code);
+  });
+  // Opened from an invite link (#timer?room=CODE): go straight to the timer and offer to join.
+  function checkInvite(){
+    const code = roomFromHash();
+    if(!code || (together && together.code === code)) return;
+    if(location.hash.replace(/^#\/?/, '').split(/[?\/&=]/)[0] !== 'timer') return;
+    invite = code; go(3); renderTogether();
+  }
+  window.addEventListener('hashchange', checkInvite);
+  checkInvite();
+  renderTogether();
 
   renderStatic();
 })();

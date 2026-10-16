@@ -249,5 +249,9 @@
     }
   };
 
+  // Live connection for the shared timer (js/sync.js).
+  Store.realtimeChannel = (name, opts) => sb.channel(name, opts);
+  Store.removeChannel = ch => sb.removeChannel(ch);
+
   window.SharedStore = Store;
 })();

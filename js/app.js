@@ -112,7 +112,7 @@
           ? `Your dyad with ${other ? esc(other.name.split(' ')[0]) : 'your buddy'} ${Date.parse(next.slot) <= Date.now() ? 'is happening now' : 'starts soon'}.`
           : `Your next dyad is <strong>${esc(M.slotLabel(next.slot))}</strong> with ${other ? esc(other.name.split(' ')[0]) : 'your buddy'}.`;
         cta = soon && next.meetingUrl
-          ? `<a class="btn primary big" href="${esc(next.meetingUrl)}" target="_blank" rel="noopener noreferrer">Join video call</a><a class="link on-photo" href="#timer">Open timer</a>`
+          ? `<a class="btn primary big" href="${esc(next.meetingUrl)}" target="_blank" rel="noopener noreferrer">Join video call</a><a class="link on-photo" href="#timer?room=${esc(window.TimerSync ? TimerSync.codeFor(next.id) : '')}">Open shared timer</a>`
           : `<a class="btn primary big" href="#buddy">View dyad</a>`;
       } else if(fresh){
         line = `You have <strong>${fresh} new match${fresh === 1 ? '' : 'es'}</strong>.`;
@@ -201,7 +201,7 @@
             ${linkEdit === s.id ? `<form class="link-form" data-linkform="${s.id}"><label class="field">Your own call link (Zoom, Google Meet …)<input name="url" type="text" inputmode="url" required placeholder="https://" value="${esc(s.meetingUrl || '')}" autocomplete="off"></label>
               <div class="row"><button class="primary" type="submit">Save link</button><button type="button" class="link" data-linkedit="${s.id}">Cancel</button></div>
               <p class="note">Your buddy sees the new link right away.</p></form>` : ''}
-            <div class="row"><button data-cal="${s.id}" aria-expanded="${calOpen === s.id}">Save in calendar</button><button class="danger" data-cancel="${s.id}">Cancel dyad</button></div>
+            <div class="row"><button data-cal="${s.id}" aria-expanded="${calOpen === s.id}">Save in calendar</button>${window.TimerSync ? `<a class="btn" href="#timer?room=${esc(TimerSync.codeFor(s.id))}">Open shared timer</a>` : ''}<button class="danger" data-cancel="${s.id}">Cancel dyad</button></div>
             ${calOpen === s.id ? calOptions(s.id, C.dyadEntry(s, me, other)) : ''}</li>`; }).join('')}</ul>`
           : `<p class="empty">Nothing booked yet. Book one of your matches below.</p>`}
       </section>

@@ -320,3 +320,16 @@ button.play{min-height:32px;padding:4px 12px;font-size:13px;flex:none}
 button.link.back{display:inline-flex;align-items:center;gap:4px;margin-left:-6px;padding:6px;font-size:14px;color:var(--muted)}
 button.link.back:hover{color:var(--fg)}
 .tabs .badge{color:#ffffff;font-weight:600;box-shadow:0 0 0 2px var(--bg)}
+
+/* Shared timer (step 3) */
+.together{display:flex;flex-direction:column;gap:8px;margin:4px 0 18px;font-size:14px}
+.together.on{background:var(--surface);border-radius:8px;padding:12px 14px}
+.together .tg-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.together .tg-head{display:flex;align-items:flex-start;gap:10px;line-height:1.45}
+.together .tg-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--faint);margin-top:6px}
+.together .tg-dot.live{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+.together .tg-code{color:var(--muted)}
+.together .tg-code b{font-family:var(--mono);font-weight:500;color:var(--fg);letter-spacing:.08em}
+.together .tg-field{width:8.5em;flex:none}
+.together .tg-field input{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;padding:6px 10px}
+.together .link.muted{color:var(--muted)}
