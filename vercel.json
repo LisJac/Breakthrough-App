@@ -1,0 +1,10 @@
+{
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "breakthrough-online(-lisjacs-projects)?\\.vercel\\.app" }],
+      "destination": "https://www.breakthrough-online.com/:path*",
+      "permanent": true
+    }
+  ]
+}
